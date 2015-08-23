@@ -8,7 +8,7 @@ genome_fasta = '/sc/orga/projects/Houton_Sander/genomes/rna_star_99_gencode_huma
 genome_gtf = '/sc/orga/projects/Houton_Sander/genomes/rna_star_99_gencode_human_8-17-15/gencode.v23.annotation.gtf'
 star_genome_folder = '/sc/orga/projects/Houton_Sander/genomes/rna_star_99_gencode_human_8-17-15/star_genome'
 read_length = 100
-cores = 12 
+cores = 6 
 fastq_dictionary = {
 					's01':'/sc/orga/projects/argmac01a/QC_C211.B857_huh7_DCPS.SE.RNASeqRibozero.RAPiD.Human/fastqs/lsi1_CAGATC_L008_R1_001.C6673ACXX.fastq.gz',
 					's02':'/sc/orga/projects/argmac01a/QC_C211.B857_huh7_DCPS.SE.RNASeqRibozero.RAPiD.Human/fastqs/lsi2_ATCACG_L008_R1_001.C6673ACXX.fastq.gz',
@@ -56,11 +56,6 @@ class make_star_align_dir(luigi.Task):
 	def output(self):
 		return luigi.LocalTarget('%s/star_align' % working_dir)
 
-class all_star_align(luigi.WrapperTask):
-	def requires(self):
-		for s,p in fastq_dictionary.items():
-			yield star_align(sample = s, path = p)
-
 class star_align(luigi.Task):
 	sample = luigi.Parameter()
 	path = luigi.Parameter()
@@ -78,17 +73,17 @@ class star_align(luigi.Task):
 						#'--sjdbGTFfile %s' % genome_gtf, 
 						'--readFilesIn %s' % self.path, 
 						'--readFilesCommand zcat', 
-						'--runThreadN %d' % cores, #(cores/len(fastq_dictionary)), 
+						'--runThreadN %d' % (cores/len(fastq_dictionary)), 
 						'--outSAMmode Full', 
 						'--outReadsUnmapped Fastx', 	
 						'--chimSegmentMin 15', 
 						'--chimJunctionOverhangMin 15', 	
 						'--outSAMstrandField intronMotif', 
 						'--outFilterType BySJout', 
-						'--outFilterIntronMotifs RemovenonconicalUnannotated', 
-						#'--genomeLoad LoadAndRemove',
-						#'--limitBAMsortRAM 10000000000', 
-						'--outSAMtype BAM SortedByCoordinate',
+						'--outFilterIntronMotifs RemoveNoncanonicalUnannotated', 
+						'--genomeLoad LoadAndRemove',
+						#'--limitBAMsortRAM 15000000000', 
+						'--outSAMtype BAM Unsorted', #SortedByCoordinate',
 						'--outFileNamePrefix %s/star_align/%s/%s.' % (working_dir, self.sample, self.sample) 
 					]
 		star = subprocess.Popen(s_command)
@@ -97,7 +92,15 @@ class star_align(luigi.Task):
 			open('%s/star_align/%s/star_align.token' % (working_dir, self.sample), 'a').close
 	def output(self):
 		return luigi.LocalTarget('%s/star_align/%s/star_align.token' % (working_dir, self.sample))
-									
+
+class all_star_align(luigi.Task):
+    def requires(self):
+        for s,p in fastq_dictionary.items():
+            return star_align(sample = s, path = p)
+	
+	def run(self):
+		bam_list = [x for x in self.input()]
+		
 		
 
 if __name__ == '__main__':
