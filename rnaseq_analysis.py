@@ -89,19 +89,37 @@ class star_align(luigi.Task):
 		star = subprocess.Popen(s_command)
 		star.wait()
 		if star.returncode == 0:
-			open('%s/star_align/%s/star_align.token' % (working_dir, self.sample), 'a').close
+			#change the name of the bam file just a bit and have it as the output below	
 	def output(self):
-		return luigi.LocalTarget('%s/star_align/%s/star_align.token' % (working_dir, self.sample))
+		return luigi.LocalTarget('%s/star_align/%s/%s.bam' % (working_dir, sample, sample) #luigi.LocalTarget('%s/star_align/%s/star_align.token' % (working_dir, self.sample))
 
 class all_star_align(luigi.Task):
     def requires(self):
         for s,p in fastq_dictionary.items():
-            return star_align(sample = s, path = p)
+            return {s:star_align(sample = s, path = p)}
 	
 	def run(self):
-		bam_list = [x for x in self.input()]
+		bam_dict = {x:self.input()[x] for x in fastq_dictionary}
+
+	def output(self):
+		return bam_dict
+
+class featureCounts(luigi.Task):
+	sample = luigi.Parameter()
+	bam_file = luigi.Parameter()
+
+	def requires(self):
+		return all_star_align()
+
+	def run(self):
+
+class all_featureCounts():
+	def requires(self):
+		return {s:featureCounts(sample = s, bam_file = b) for s,b in bam_dict.items()}
+
+	def run(self):
 		
-		
+				
 
 if __name__ == '__main__':
 	luigi.run()
