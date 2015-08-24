@@ -78,8 +78,8 @@ class star_align(luigi.Task):
 		return index_STAR_genome(), make_star_align_dir()
 	
 	def run(self):
-		if not os.path.exists('%s/star_align/%s' % (working_dir,self.sample)):
-			os.mkdir('%s/star_align/%s' % (working_dir,self.sample))	
+		if not os.path.exists('%s/%s/star_align/' % (working_dir,self.sample)):
+			os.makedirs('%s/%s/star_align' % (working_dir,self.sample))	
 		
 		s_command = [
                 'STAR', 
@@ -98,14 +98,15 @@ class star_align(luigi.Task):
 					'--genomeLoad LoadAndRemove',
 					#'--limitBAMsortRAM 15000000000', 
 					'--outSAMtype BAM Unsorted', #SortedByCoordinate',
-					'--outFileNamePrefix %s/star_align/%s/%s.' % (working_dir, self.sample, self.sample) 
+					'--outFileNamePrefix %s/%s/star_align/%s.' % (working_dir, self.sample, self.sample) 
 					]
 		star = subprocess.Popen(s_command)
 		star.wait()
 		if star.returncode == 0:
 			#change the name of the bam file just a bit and have it as the output below	
 	def output(self):
-		return luigi.LocalTarget('%s/star_align/%s/%s.bam' % (working_dir, sample, sample) #luigi.LocalTarget('%s/star_align/%s/star_align.token' % (working_dir, self.sample))
+		return luigi.LocalTarget('%s/%s/star_align/%s.bam' % (working_dir, sample, sample) #luigi.LocalTarget('%s/star_align/%s/star_align.token' % (working_dir, self.sample))
+
 
 class all_star_align(luigi.Task):
     def requires(self):
@@ -118,14 +119,20 @@ class all_star_align(luigi.Task):
 	def output(self):
 		return bam_dict
 
+
+
 class featureCounts(luigi.Task):
 	sample = luigi.Parameter()
 	bam_file = luigi.Parameter()
+    
+    output_dir = '%s/%s/featureCounts' % (working_dir, self.sample)
 
 	def requires(self):
 		return all_star_align()
 
 	def run(self):
+        if not os.path.exists(output_dir)):  
+            os.makedirs(output_dir)
         featureCounts_command = [
             'featureCounts',
                 '--primary',
@@ -134,17 +141,28 @@ class featureCounts(luigi.Task):
                 '-f',
                 '-s 0',
                 '-a %s' % genome_gtf,
-                '-o 
-                
+                '-o %s' % output_dir,
+                bam_file
+                ]
+        fC = subprocess.Popen(featureCounts_command)
+        fC.wait()
+        if fC.returncode == 0:
+            subprocess.call(['rm -rf', output_dir])
+    def output:
+        return luigi.LocalTarget('%s/%s.counts' % (output_dir, self.sample)
 
 class all_featureCounts():
 	def requires(self):
 		return {s:featureCounts(sample = s, bam_file = b) for s,b in bam_dict.items()}
 
 	def run(self):
-		
+        #This should give me a dictionary of {sample:gene_counts file}
+        gene_counts_dict = {x:self.input()[x] for x in self.input()}
 				
+    def output(self):
+        return gene_counts_dict
+
 
 if __name__ == '__main__':
-	luigi.run()
+    luigi.run()
 
