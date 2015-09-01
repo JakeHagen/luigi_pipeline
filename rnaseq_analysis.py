@@ -105,7 +105,7 @@ class star_align(luigi.Task):
         if star.returncode != 0:
             subprocess.call(['rm', '-rf', '%s/%s/star' % (wkdir, self.sample)])
     def output(self):
-        return luigi.LocalTarget('%s/%s/star/%s.Aligned.out.bam' % (wkdir, self.sample, self.sample))
+        return luigi.LocalTarget('%s/%s/star/%s.Aligned.sortedByCoord.out.bam' % (wkdir, self.sample, self.sample))
 
 #class star_shared_memory_load(luigi.Task):
 #    def run(self):
