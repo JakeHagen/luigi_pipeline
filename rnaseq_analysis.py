@@ -80,7 +80,6 @@ class star_align(luigi.Task):
 
     def run(self):
         os.makedirs('%s/%s/star' % (wkdir, self.sample))
-        #os.chdir('%s/%s/star' % (output_dir, self.sample))
         s_command = [
                 'STAR',
                     '--genomeDir %s' % star_genome_folder,
@@ -107,11 +106,6 @@ class star_align(luigi.Task):
     def output(self):
         return luigi.LocalTarget('%s/%s/star/%s.Aligned.sortedByCoord.out.bam' % (wkdir, self.sample, self.sample))
 
-#class star_shared_memory_load(luigi.Task):
-#    def run(self):
-#        s_command = [
-#                'STAR',
-#                '--genomeLoad LoadAndExit'
 
 class all_star_align(luigi.Task):
     def requires(self):
@@ -138,14 +132,12 @@ class featureCounts(luigi.Task):
         return all_star_align()
 
     def run(self):
-        #output_dir = '%s/%s/featureCounts' % (working_dir, self.sample)
-        if not os.path.exists(output_dir):
-            os.makedirs(output_dir)
+        os.makedirs('%s/%s/featureCounts' % (wkdir, self.sample))
         featureCounts_command = [
                                 'featureCounts',
                                     '--primary',
                                     '-F GTF',
-                                    '-T %d' % (cores/len(fastq_dictionary)),
+                                    '-T %d' % cores#(cores/len(fastq_dictionary)),
                                     '-f',
                                     '-s %d' % stranded,
                                     '-a %s' % genome_gtf,
