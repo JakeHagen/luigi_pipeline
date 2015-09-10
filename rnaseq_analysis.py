@@ -101,10 +101,16 @@ class star_align(luigi.Task):
                     ]
         star = subprocess.Popen(s_command)
         star.wait()
+        # Below removes folder if star command was unsuccessful 
+        # (files remain when star fails)
+        # renaming bam insures that if batch job gets cut while star is running
+        # the task will not be marked as complete 
         if star.returncode != 0:
             subprocess.call(['rm', '-rf', '%s/%s/star' % (wkdir, self.sample)])
+        else:
+            os.rename('%s/%s/star/%s.Aligned.sortedByCoord.out.bam' % (wkdir, self.sample, self.sample), '%s/%s/star/%s.bam' % (wkdir, self.sample, self.sample))
     def output(self):
-        return luigi.LocalTarget('%s/%s/star/%s.Aligned.sortedByCoord.out.bam' % (wkdir, self.sample, self.sample))
+        return luigi.LocalTarget('%s/%s/star/%s.bam' % (wkdir, self.sample, self.sample))
 
 
 class all_star_align(luigi.Task):
@@ -118,40 +124,43 @@ class all_star_align(luigi.Task):
         return {x:self.input()[x] for x in fastq_dictionary}
 
     def output(self):
-        return self.run()
+        bam_dict = self.run()
+        return bam_dict
 
 
 
 class featureCounts(luigi.Task):
     sample = luigi.Parameter()
     bam_file = luigi.Parameter()
-
+    fc_wkdir = '%s/%s/featureCounts' % (wkdir, sample)
 
 
     def requires(self):
         return all_star_align()
 
     def run(self):
-        os.makedirs('%s/%s/featureCounts' % (wkdir, self.sample))
+        os.makedirs(fc_wkdir)
         featureCounts_command = [
                                 'featureCounts',
                                     '--primary',
                                     '-F GTF',
-                                    '-T %d' % cores#(cores/len(fastq_dictionary)),
-                                    '-f',
+                                    '-T %d' % cores,#(cores/len(fastq_dictionary)),
+                                    #'-f',
                                     '-s %d' % stranded,
                                     '-a %s' % genome_gtf,
-                                    '-o %s' % output_dir,
-                                    bam_file
+                                    '-o %s/%s.primary.prelim.counts' % (fc_wkdir,self.sample),
+                                    self.bam_file
                                 ]
         fC = subprocess.Popen(featureCounts_command)
         fC.wait()
         if fC.returncode == 0:
-            subprocess.call(['rm', '-rf', output_dir])
+            subprocess.call(['rm', '-rf', fc_wkdir])
+        else:
+            os.rename('%s/%s.primary.prelim.counts' % (fc_wkdir, self.sample), '%s/%s.primary.counts' % (fc_wkdir, self.sample))
+            os.rename('%s/%s.primary.prelim.counts.summary' % (fc_wkdir, self.sample), '%s/%s.primary.counts.summary' % (fc_wkdir, self.sample))
 
     def output(self):
-        output_dir = '%s/%s/featureCounts' % (working_dir, self.sample)
-        return luigi.LocalTarget('%s/%s.counts' % (output_dir, self.sample))
+        return luigi.LocalTarget('%s/%s.primary.counts' % (fc_wkdir, self.sample))
 
 class all_featureCounts(luigi.Task):
 
@@ -160,10 +169,10 @@ class all_featureCounts(luigi.Task):
 
     def run(self):
         #This should give me a dictionary of {sample:gene_counts file}
-        gene_counts_dict = {x:self.input()[x] for x in self.input()}
+        return {x:self.input()[x] for x in self.input()}
 
     def output(self):
-        return gene_counts_dict
+        return self.run()
 
 if __name__ == '__main__':
     luigi.run()
