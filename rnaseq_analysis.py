@@ -121,11 +121,10 @@ class all_star_align(luigi.Task):
         return inpt
 
     def run(self):
-        return {x:self.input()[x] for x in fastq_dictionary}
-
-    def output(self):
-        bam_dict = self.run()
+        bam_dict = {x:self.input()[x] for x in fastq_dictionary}
         return bam_dict
+    def output(self):
+        return self.run() 
 
 
 
@@ -165,7 +164,7 @@ class featureCounts(luigi.Task):
 class all_featureCounts(luigi.Task):
 
     def requires(self):
-        return {s:featureCounts(sample = s, bam_file = b) for s,b in bam_dict.items()}
+        return {s:featureCounts(sample = s, bam_file = b) for s,b in all_star_align.run().items()}
 
     def run(self):
         #This should give me a dictionary of {sample:gene_counts file}
