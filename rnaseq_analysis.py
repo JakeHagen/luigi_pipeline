@@ -5,7 +5,6 @@ import os
 #will output will be, can be pointed at an existing folder or the pipeline will create it
 wkdir = '/sc/orga/projects/argmac01a/luigi_rna'
 
-
 # Only needed if STAR genome needs to be generated
 genome_fasta = '/sc/orga/projects/Houton_Sander/genomes/rna_star_99_gencode_human_8-17-15/GRCh38.primary_assembly.genome.fa'
 genome_gtf = '/sc/orga/projects/Houton_Sander/genomes/rna_star_99_gencode_human_8-17-15/gencode.v23.annotation.gtf'
@@ -22,7 +21,7 @@ stranded = 0
 #prep = polyA or ribozero
 
 # Should be multiple of samples
-cores = 12
+cores = 6
 
 # Needs to be sample name (can be anything) and location of fastq.gz
 fastq_dictionary = {'s01':'/sc/orga/projects/argmac01a/QC_C211.B857_huh7_DCPS.SE.RNASeqRibozero.RAPiD.Human/fastqs/lsi1_CAGATC_L008_R1_001.C6673ACXX.fastq.gz',
@@ -120,34 +119,33 @@ class all_star_align(luigi.Task):
             inpt[s] = star_align(sample = s, path = p)
         return inpt
 
-    def run(self):
-        bam_dict = {x:self.input()[x] for x in fastq_dictionary}
-        return bam_dict
+    #def run(self):
+    #    bam_dict = {x:self.input()[x] for x in fastq_dictionary}
+    #    return bam_dict
     def output(self):
-        return self.run() 
+        return {x:self.input()[x] for x in fastq_dictionary} 
 
 
 
 class featureCounts(luigi.Task):
     sample = luigi.Parameter()
     bam_file = luigi.Parameter()
-    fc_wkdir = '%s/%s/featureCounts' % (wkdir, sample)
-
+    
 
     def requires(self):
         return all_star_align()
 
     def run(self):
+        fc_wkdir = '%s/%s/featureCounts' % (wkdir, self.sample)
         os.makedirs(fc_wkdir)
         featureCounts_command = [
                                 'featureCounts',
                                     '--primary',
-                                    '-F GTF',
-                                    '-T %d' % cores,#(cores/len(fastq_dictionary)),
-                                    #'-f',
-                                    '-s %d' % stranded,
-                                    '-a %s' % genome_gtf,
-                                    '-o %s/%s.primary.prelim.counts' % (fc_wkdir,self.sample),
+                                    '-F', 'GTF',
+                                    '-T', '%d' % cores,
+                                    '-s', '%d' % stranded,
+                                    '-a', '%s' % genome_gtf,
+                                    '-o', ' %s/%s.primary.prelim.counts' % (fc_wkdir,self.sample),
                                     self.bam_file
                                 ]
         fC = subprocess.Popen(featureCounts_command)
@@ -159,12 +157,15 @@ class featureCounts(luigi.Task):
             os.rename('%s/%s.primary.prelim.counts.summary' % (fc_wkdir, self.sample), '%s/%s.primary.counts.summary' % (fc_wkdir, self.sample))
 
     def output(self):
+        fc_wkdir = '%s/%s/featureCounts' % (wkdir, self.sample)
         return luigi.LocalTarget('%s/%s.primary.counts' % (fc_wkdir, self.sample))
 
 class all_featureCounts(luigi.Task):
 
     def requires(self):
-        return {s:featureCounts(sample = s, bam_file = b) for s,b in all_star_align.run().items()}
+        test = all_star_align()
+        bam_dict = test.output() 
+        return {s:featureCounts(sample = s, bam_file = b.path) for s,b in bam_dict.items()}             
 
     def run(self):
         #This should give me a dictionary of {sample:gene_counts file}
