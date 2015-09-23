@@ -2,26 +2,26 @@ import luigi
 import subprocess
 import os
 
-#will output will be, can be pointed at an existing folder or the pipeline will create it
-wkdir = '/sc/orga/projects/argmac01a/luigi_rna'
 
+#will output will be, can be pointed at an existing folder or the pipeline will create it
+wkdir = luigi.Parameter(default = '/sc/orga/projects/argmac01a/luigi_rna_ensembl37')
 # Only needed if STAR genome needs to be generated
-genome_fasta = '/sc/orga/projects/Houton_Sander/genomes/rna_star_99_gencode_human_8-17-15/GRCh38.primary_assembly.genome.fa'
-genome_gtf = '/sc/orga/projects/Houton_Sander/genomes/rna_star_99_gencode_human_8-17-15/gencode.v23.annotation.gtf'
+genome_fasta = luigi.Parameter(default = '/sc/orga/projects/Houton_Sander/genomes/ensembl37/Homo_sapiens.GRCh37.75.dna.primary_assembly.fa') 
+genome_gtf = luigi.Parameter(default = '/sc/orga/projects/Houton_Sander/genomes/ensembl37/Homo_sapiens.GRCh37.75.gtf')
 
 """Either where the STAR genome is located or were it will be created
    IMPORTANT: if the STAR genome needs to be created, do not create the folder,
    Let the pipeline create it."""
-star_genome_folder = '/sc/orga/projects/Houton_Sander/genomes/rna_star_99_gencode_human_8-17-15/star_genome'
+star_genome_folder = luigi.Parameter(default = '/sc/orga/projects/Houton_Sander/genomes/ensembl37/star_genome_ensembl37_99')
 
 # RNAseq experiment info
-read_length = 100
-stranded = 0
+read_length = luigi.FloatParameter(default = 100)
+stranded = luigi.FloatParameter(default = 0)
 #paried = ?
 #prep = polyA or ribozero
 
 # Should be multiple of samples
-cores = 6
+cores = luigi.FloatParameter(default = 6)
 
 # Needs to be sample name (can be anything) and location of fastq.gz
 fastq_dictionary = {'s01':'/sc/orga/projects/argmac01a/QC_C211.B857_huh7_DCPS.SE.RNASeqRibozero.RAPiD.Human/fastqs/lsi1_CAGATC_L008_R1_001.C6673ACXX.fastq.gz',
@@ -42,8 +42,7 @@ class index_STAR_genome(luigi.Task):
 
     def run(self):
         if not os.path.exists(star_genome_folder):
-            os.mkdir(star_genome_folder)
-        subprocess.call(['cd %s/..' % star_genome_folder])
+            os.makedirs(star_genome_folder) 
         star_command = [
                         'STAR',
                         '--runThreadN %d' % cores,
@@ -57,9 +56,9 @@ class index_STAR_genome(luigi.Task):
         star.wait()
         if star.returncode != 0:
             subprocess.call(['rm -rf %s' % star_genome_folder])
-
+        os.rename('Log.out', '%s/Log.out' % star_genome_folder)
     def output(self):
-        return luigi.LocalTarget(star_genome_folder)
+        return luigi.LocalTarget('%s/Log.out' % star_genome_folder)
 
 
 
@@ -137,28 +136,28 @@ class featureCounts(luigi.Task):
 
     def run(self):
         fc_wkdir = '%s/%s/featureCounts' % (wkdir, self.sample)
-        os.makedirs(fc_wkdir)
+        if not os.path.exists(fc_wkdir):
+            os.makedirs(fc_wkdir)
         featureCounts_command = [
                                 'featureCounts',
-                                    '--primary',
                                     '-F', 'GTF',
                                     '-T', '%d' % cores,
                                     '-s', '%d' % stranded,
                                     '-a', '%s' % genome_gtf,
-                                    '-o', ' %s/%s.primary.prelim.counts' % (fc_wkdir,self.sample),
+                                    '-o', '%s/%s.prelim.counts' % (fc_wkdir,self.sample),
                                     self.bam_file
                                 ]
         fC = subprocess.Popen(featureCounts_command)
         fC.wait()
-        if fC.returncode == 0:
+        if fC.returncode != 0:
             subprocess.call(['rm', '-rf', fc_wkdir])
         else:
-            os.rename('%s/%s.primary.prelim.counts' % (fc_wkdir, self.sample), '%s/%s.primary.counts' % (fc_wkdir, self.sample))
-            os.rename('%s/%s.primary.prelim.counts.summary' % (fc_wkdir, self.sample), '%s/%s.primary.counts.summary' % (fc_wkdir, self.sample))
+            os.rename('%s/%s.prelim.counts' % (fc_wkdir, self.sample), '%s/%s.counts' % (fc_wkdir, self.sample))
+            os.rename('%s/%s.prelim.counts.summary' % (fc_wkdir, self.sample), '%s/%s.counts.summary' % (fc_wkdir, self.sample))
 
     def output(self):
         fc_wkdir = '%s/%s/featureCounts' % (wkdir, self.sample)
-        return luigi.LocalTarget('%s/%s.primary.counts' % (fc_wkdir, self.sample))
+        return luigi.LocalTarget('%s/%s.counts' % (fc_wkdir, self.sample))
 
 class all_featureCounts(luigi.Task):
 
