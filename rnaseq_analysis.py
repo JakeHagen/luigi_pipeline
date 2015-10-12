@@ -1,6 +1,8 @@
 import luigi
 import subprocess
 import os
+import rpy2
+import pandas as pd
 
 #class params(luigi.Task):
 
@@ -31,6 +33,7 @@ s03:/sc/orga/projects/argmac01a/QC_C211.B857_huh7_DCPS.SE.RNASeqRibozero.RAPiD.H
 """
 
 class params(luigi.Task):
+    
     fq = luigi.Parameter()
     wkdir = luigi.Parameter(default = '/sc/orga/projects/argmac01a/luigi_rna_ensembl37')                       
     # Only needed if STAR genome needs to be generated                          
@@ -52,6 +55,7 @@ class params(luigi.Task):
 pm = params
 
 class fastqs(luigi.Task):
+    
     def requires(self):
         return params()
     def output(self):
@@ -62,14 +66,10 @@ class fastqs(luigi.Task):
                 d[key] = val  
         return d
 
-# Not really need, was originally created for testing
-#class genomeFiles(luigi.Task):
-#    def output(self):
-#        return (luigi.LocalTarget(genome_fasta), luigi.LocalTarget(genome_gtf))
-
 class index_STAR_genome(luigi.Task):
-    #def requires(self):
-    #    return genomeFiles()
+    
+    def requires(self):
+        return fastqs()
 
     def run(self):
         if not os.path.exists(pm().star_genome_folder):
@@ -92,8 +92,8 @@ class index_STAR_genome(luigi.Task):
         return luigi.LocalTarget('%s/Log.out' % pm().star_genome_folder)
 
 
-
 class wk_dir(luigi.Task):
+    
     def requires(self):
         return index_STAR_genome()
     def run(self):
@@ -101,7 +101,9 @@ class wk_dir(luigi.Task):
     def output(self):
         return luigi.LocalTarget(pm().wkdir)
 
+
 class star_align(luigi.Task):
+    
     sample = luigi.Parameter()
     path = luigi.Parameter()
     def requires(self):
@@ -143,6 +145,7 @@ class star_align(luigi.Task):
 
 
 class all_star_align(luigi.Task):
+    
     def requires(self):
         inpt = {}
         for s,p in fastqs().output().items():
@@ -153,12 +156,11 @@ class all_star_align(luigi.Task):
         return {x:self.input()[x] for x in self.input()} 
 
 
-
 class featureCounts(luigi.Task):
+    
     sample = luigi.Parameter()
     bam_file = luigi.Parameter()
     
-
     def requires(self):
         return all_star_align()
 
@@ -187,6 +189,7 @@ class featureCounts(luigi.Task):
         fc_wkdir = '%s/%s/featureCounts' % (wkdir, self.sample)
         return luigi.LocalTarget('%s/%s.counts' % (fc_wkdir, self.sample))
 
+
 class all_featureCounts(luigi.Task):
 
     def requires(self):
@@ -196,17 +199,26 @@ class all_featureCounts(luigi.Task):
     def output(self):        
         return {x:self.input()[x] for x in self.input()}
 
-class diff_exp_analysis(luigi.Task):
 
+class diff_exp_analysis(luigi.Task):
+    
     def requires(self):
         return all_featureCounts()
 
     def run(self):
         sample_names = [x for x in self.input()]
         count_files = [self.input()[y].path for y in self.input()]
-        #experiment_group
-        print(sample_names)
-        print(count_files)
+        experiment_group = [x[0] for x in self.input()]
+        print(pd.concat(
+                [
+                 pd.read_table(item, skiprows=2, index_col=0,usecols = [0,6], header=None) 
+                    for item in count_files 
+                    ]
+                     , axis = 1)
+                        )
+    def output(self):
+        return luigi.LocalTarget('rtest.txt')
+        
     #def output():
     #    return [self.input()[y].path for y in self.input()]
 
