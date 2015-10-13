@@ -1,7 +1,9 @@
 import luigi
 import subprocess
 import os
-import rpy2
+import readline
+import rpy2.robjects as robjects
+from rpy2.robjects import pandas2ri
 import pandas as pd
 
 #class params(luigi.Task):
@@ -209,15 +211,26 @@ class diff_exp_analysis(luigi.Task):
         sample_names = [x for x in self.input()]
         count_files = [self.input()[y].path for y in self.input()]
         experiment_group = [x[0] for x in self.input()]
-        print(pd.concat(
-                [
-                 pd.read_table(item, skiprows=2, index_col=0,usecols = [0,6], header=None) 
-                    for item in count_files 
+        
+        files = [
+                pd.read_table(self.input()[name].path, 
+                                skiprows=2, 
+                                index_col=0,
+                                names = ['Gene', 't', 'e', 's', 'r', 'w', name],
+                                usecols = ['Gene', name], 
+                                header=None)
+                    for name in self.input()
                     ]
-                     , axis = 1)
-                        )
+        count_table = pd.concat(files, axis = 1).sort_index(axis=1)
+       # count_table.to_csv("/hpc/users/hagenj02/luigi_pipeline/counts")
+        pandas2ri.activate()
+        r = robjects.r
+        robjects.globalenv["experimentGroups"] = robjects.StrVector(experiment_group)
+        robjects.globalenv["countTable"] = pandas2ri.py2ri(count_table)
+        
+        r['source']("/hpc/users/hagenj02/luigi_pipeline/script.R")
     def output(self):
-        return luigi.LocalTarget('rtest.txt')
+        return luigi.LocalTarget('/hpc/users/hagenj02/luigi_pipeline/deg_test.txt')
         
     #def output():
     #    return [self.input()[y].path for y in self.input()]
