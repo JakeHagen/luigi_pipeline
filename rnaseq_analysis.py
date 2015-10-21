@@ -1,11 +1,8 @@
 import luigi
 import subprocess
 import os
-import readline
-import rpy2.robjects as robjects
-from rpy2.robjects import pandas2ri
-import pandas as pd
-
+import rpy2.robjects as robjects                                            
+import pandas as pd 
 #class params(luigi.Task):
 
     #will output will be, can be pointed at an existing folder or the pipeline will create it
@@ -203,7 +200,9 @@ class all_featureCounts(luigi.Task):
 
 
 class diff_exp_analysis(luigi.Task):
-    
+    #import rpy2.robjects as robjects
+    #import pandas as pd
+
     def requires(self):
         return all_featureCounts()
 
@@ -223,12 +222,44 @@ class diff_exp_analysis(luigi.Task):
                     ]
         count_table = pd.concat(files, axis = 1).sort_index(axis=1)
        # count_table.to_csv("/hpc/users/hagenj02/luigi_pipeline/counts")
-        pandas2ri.activate()
-        r = robjects.r
-        robjects.globalenv["experimentGroups"] = robjects.StrVector(experiment_group)
-        robjects.globalenv["countTable"] = pandas2ri.py2ri(count_table)
+       # pandas2ri.activate()
+       # r = robjects.r
+       # robjects.globalenv['experimentGroups'] = robjects.StrVector(experiment_group)
+       
+       #robjects.globalenv['countTable'] = pandas2ri.py2ri(count_table)
         
-        r['source']("/hpc/users/hagenj02/luigi_pipeline/script.R")
+        limma = robjects.r('''
+                library("limma")
+                library("edgeR")
+                experimentGroups <- c("c13", "c14", "c15", "s01", "s02", "s03")
+                design <- model.matrix(~0+factor(experimentGroups))
+                colnames(design) <- c(unique(experimentGroups))
+                
+                countTable <- read.csv("counts")
+                rownames(countTable) <- countTable$Gene
+                countTable <- countTable[c(2,3,4,5,6,7)]
+                t <- DGEList(countTable, group = experimentGroups)
+
+                keep <- rowSums(cpm(t)>1) >= 3  
+                y <- t[keep,] #throw out genes that do not have at least one cpm in at least 3 samples 
+
+                dge <- calcNormFactors(y) #Use TMM normalization to correct for library size
+                v <- voom(dge, design=design,plot=FALSE) #Voom transformation, convert to log2CPM and associate a weight based on variance
+
+                fit <- lmFit(v,design = design) #Fit glm model
+                contrast.matrix <- makeContrasts(siRNA-control, levels=design)#Contrast matrix for constrasts of interest
+                fit2 <- contrasts.fit(fit,contrast.matrix)
+                fit2 <- eBayes(fit2)
+
+                # Output list of all genes for each contrast that had counts
+                # Adjusted p values by BH, (BH is default)
+                siRNA_control_full <- topTable(fit2, number = 200000, coef=1)
+                siRNA_control_full$gene <- rownames(siRNA_control_full)
+                siRNA_control_padj.05 <- topTable(fit2, number = 200000, coef=1, adjust="BH", p.value = .1)
+                write.table(siRNA_control_padj.05, file = "/hpc/users/hagenj02/luigi_pipeline/deg_test.txt", col.names = NA, sep = "\t", quote = FALSE)
+            ''')
+        limma()
+        #r['source']("/hpc/users/hagenj02/luigi_pipeline/script.R")
     def output(self):
         return luigi.LocalTarget('/hpc/users/hagenj02/luigi_pipeline/deg_test.txt')
         
