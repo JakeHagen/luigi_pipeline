@@ -102,7 +102,8 @@ class star_align(luigi.Task):
         return index_STAR_genome(), wk_dir(), fastqs()
 
     def run(self):
-        if not os.path.exists('%s/%s/star' % (parameters().wkdir, self.sample)):                    os.makedirs('%s/%s/star' % (parameters().wkdir, self.sample))
+        if not os.path.exists('%s/%s/star' % (parameters().wkdir, self.sample)):
+            os.makedirs('%s/%s/star' % (parameters().wkdir, self.sample))
         s_command = [
                 'STAR',
                     '--genomeDir %s' % parameters().star_genome_folder,
@@ -231,13 +232,13 @@ class diff_exp_analysis(luigi.Task):
                     ]
         count_table = pd.concat(files, axis = 1).sort_index(axis=1)
        # count_table.to_csv("/hpc/users/hagenj02/luigi_pipeline/counts")
-       # pandas2ri.activate()
-       # r = robjects.r
-       # robjects.globalenv['experimentGroups'] = robjects.StrVector(experiment_group)
+       pandas2ri.activate()
+       r = robjects.r
+       robjects.globalenv['experimentGroups'] = robjects.StrVector(experiment_group)
        
-       #robjects.globalenv['countTable'] = pandas2ri.py2ri(count_table)
+       robjects.globalenv['countTable'] = pandas2ri.py2ri(count_table)
         
-        limma = robjects.r('''
+       limma = robjects.r('''
                 library("limma")
                 library("edgeR")
                 experimentGroups <- c("c13", "c14", "c15", "s01", "s02", "s03")
