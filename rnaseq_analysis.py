@@ -44,15 +44,16 @@ class fastqs(luigi.Task):
         return parameters()
     
     def run(self):    
-        fastq_dic = {}
+        fastq_dict = {}
         with open(parameters().fastq_file) as f:
             for line in f:
                 sample,path = line.strip().split(":")
-                fastq_dic[sample] = path
-        return fastq_dic
+                fastq_dict[sample] = path
+        return fastq_dict
     
     def output(self):
-        return {sample:luigi.LocalTarget(path) for sample,path in self.run().items()} 
+        fastq_dict = self.run()
+        return {sample:luigi.LocalTarget(path) for sample,path in fastq_dict.items()} 
 
 
 class index_STAR_genome(luigi.Task):
@@ -101,15 +102,14 @@ class star_align(luigi.Task):
         return index_STAR_genome(), wk_dir(), fastqs()
 
     def run(self):
-        if not os.path.exists('%s/%s/star' % (parameters().wkdir, self.sample)):             
-            os.makedirs('%s/%s/star' % (parameters().wkdir, self.sample))
+        if not os.path.exists('%s/%s/star' % (parameters().wkdir, self.sample)):                    os.makedirs('%s/%s/star' % (parameters().wkdir, self.sample))
         s_command = [
                 'STAR',
                     '--genomeDir %s' % parameters().star_genome_folder,
                     #'--sjdbGTFfile %s' % genome_gtf,
                     '--readFilesIn %s' % self.file_location.path,
                     '--readFilesCommand zcat',
-                    '--runThreadN %d' % parameters().cores, #(cores/len(fastq_dictionary)),
+                    '--runThreadN %d' % parameters().cores,
                     '--outSAMmode Full',
                     '--outReadsUnmapped Fastx',
                     '--chimSegmentMin 15',
@@ -120,7 +120,8 @@ class star_align(luigi.Task):
                     #'--genomeLoad LoadAndRemove',
                     #'--limitBAMsortRAM 15000000000',
                     '--outSAMtype BAM SortedByCoordinate',#Unsorted
-                    '--outFileNamePrefix %s/%s/star/%s.' % (parameters().wkdir, self.sample, self.sample)
+                    '--outFileNamePrefix %s/%s/star/%s.' % 
+                        (parameters().wkdir, self.sample, self.sample)
                     ]
         star = subprocess.Popen(s_command)
         star.wait()
@@ -144,7 +145,9 @@ class star_align(luigi.Task):
 
 
 class all_star_align(luigi.Task):
-    
+    '''Requires splits out samples and runs star align concurrently
+    output is dictionary with sample name and luigi target of bam file
+    '''
     def requires(self):
         fastq_dict = fastqs().output()
         return {
@@ -192,7 +195,9 @@ class featureCounts(luigi.Task):
 
 
 class all_featureCounts(luigi.Task):
-
+    '''requires splits out samples and run featureCounts concurrently
+    output returns dictionary with sample name and count file
+    '''
     def requires(self):
         bam_dict = all_star_align().output() 
         return {
