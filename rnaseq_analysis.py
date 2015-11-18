@@ -1,15 +1,20 @@
 import luigi
+import luigi.postgres
+import psycopg2
 import subprocess
 import os
 import rpy2.robjects as robjects                                            
 import pandas as pd 
+import sqlalchemy
 
 class parameters(luigi.Task):
     """class to take all parameters
     fastq_file needs to be in the format specified below, if the experiment is 
     paired end, the second fastq file should be after the first, only seperated 
     by a space
-    
+    If there are multiple files, seperate by comma without space
+    Single space seperates mates
+    Single comma seperates multiple files
     s01:/sc/orga/projects/argmac01a/QC_C211.B857_huh7_DCPS.SE.RNASeqRibozero.RAPiD.Human/fastqs/lsi1_CAGATC_L008_R1_001.C6673ACXX.fastq.gz
     s02:/sc/orga/projects/argmac01a/QC_C211.B857_huh7_DCPS.SE.RNASeqRibozero.RAPiD.Human/fastqs/lsi2_ATCACG_L008_R1_001.C6673ACXX.fastq.gz
     s03:/sc/orga/projects/argmac01a/QC_C211.B857_huh7_DCPS.SE.RNASeqRibozero.RAPiD.Human/fastqs/lsi3_TCGGCA_L008_R1_001.C6673ACXX.fastq.gz
@@ -153,7 +158,7 @@ class all_star_align(luigi.Task):
         fastq_dict = fastqs().output()
         return {
                 s:star_align(sample = s, file_location = p) 
-                    for s,p in fastqs_dict.items()
+                    for s,p in fastq_dict.items()
                 }
     def output(self):       
         bam_dict = self.input()
@@ -210,6 +215,41 @@ class all_featureCounts(luigi.Task):
         counts_dict = self.input()
         return counts_dict
 
+class count_matrix_postgresql(luigi.Task):
+    host = 'localhost'
+    database = 'RNA'
+    user = 'hagenj02'
+    password = 'REDACTED'
+    table = 'test'
+    update_id = 'testy'
+
+    def requires(self):
+        return all_featureCounts()
+
+    def run(self):
+        sample_names = [x for x in self.input()]
+        count_files = [self.input()[y].path for y in self.input()]
+        pandas_files = [
+                        pd.read_table(self.input()[name].path, 
+                            skiprows = 2,
+                            index_col = 0,
+                            names = ['Gene', 'Chr', 'Start', 'End', 
+                                        'Strand', 'Length', name],
+                            usecols = ['Gene', name],
+                            header = None)
+                        for name in self.input()
+                        ]
+        count_table = pd.concat(pandas_files, axis = 1).sort_index(axis=1)
+        engine = sqlalchemy.create_engine('postgresql://hagenj02:REDACTED@localhost/RNA')
+        count_table.to_sql('test', engine, if_exists = 'replace')
+
+    def output(self):
+        return luigi.postgres.PostgresTarget(host = self.host, 
+                                    database = self.database, user = self.user,
+                                    password = self.password, table = self.table,
+                                    update_id = self.update_id) 
+
+
 
 class diff_exp_analysis(luigi.Task):
     
@@ -217,28 +257,13 @@ class diff_exp_analysis(luigi.Task):
         return all_featureCounts()
 
     def run(self):
-        sample_names = [x for x in self.input()]
-        count_files = [self.input()[y].path for y in self.input()]
-        experiment_group = [x[0] for x in self.input()]
-        
-        files = [
-                pd.read_table(self.input()[name].path, 
-                                skiprows=2, 
-                                index_col=0,
-                                names = ['Gene', 't', 'e', 's', 'r', 'w', name],
-                                usecols = ['Gene', name], 
-                                header=None)
-                    for name in self.input()
-                    ]
-        count_table = pd.concat(files, axis = 1).sort_index(axis=1)
-       # count_table.to_csv("/hpc/users/hagenj02/luigi_pipeline/counts")
-       pandas2ri.activate()
-       r = robjects.r
-       robjects.globalenv['experimentGroups'] = robjects.StrVector(experiment_group)
+        pandas2ri.activate()
+        r = robjects.r
+        robjects.globalenv['experimentGroups'] = robjects.StrVector(experiment_group)
        
-       robjects.globalenv['countTable'] = pandas2ri.py2ri(count_table)
+        robjects.globalenv['countTable'] = pandas2ri.py2ri(count_table)
         
-       limma = robjects.r('''
+        limma = robjects.r('''
                 library("limma")
                 library("edgeR")
                 experimentGroups <- c("c13", "c14", "c15", "s01", "s02", "s03")
