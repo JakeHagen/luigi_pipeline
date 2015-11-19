@@ -215,18 +215,26 @@ class all_featureCounts(luigi.Task):
         counts_dict = self.input()
         return counts_dict
 
-class count_matrix_postgresql(luigi.Task):
+class count_matrix_postgresql(luigi.postgres.CopyToTable):
     host = 'localhost'
     database = 'RNA'
     user = 'hagenj02'
     password = 'REDACTED'
     table = 'test'
-    update_id = 'testy'
+        
+    columns = [("Gene", "TEXT"),
+               ("c13", "INT"),
+               ("c14", "INT"),
+               ("c15", "INT"),
+               ("s01", "INT"),                                                  
+               ("s02", "INT"),                                                  
+               ("s03", "INT")]
 
     def requires(self):
         return all_featureCounts()
 
-    def run(self):
+    def rows(self):
+        
         sample_names = [x for x in self.input()]
         count_files = [self.input()[y].path for y in self.input()]
         pandas_files = [
@@ -240,14 +248,18 @@ class count_matrix_postgresql(luigi.Task):
                         for name in self.input()
                         ]
         count_table = pd.concat(pandas_files, axis = 1).sort_index(axis=1)
-        engine = sqlalchemy.create_engine('postgresql://hagenj02:REDACTED@localhost/RNA')
-        count_table.to_sql('test', engine, if_exists = 'replace')
+        count_table = count_table.to_records()
+        print(count_table[0])
+        for row in count_table:
+            yield(row)
+        #engine = sqlalchemy.create_engine('postgresql://hagenj02:REDACTED@localhost/RNA')
+        #count_table.to_sql('test', engine, if_exists = 'replace')
 
-    def output(self):
-        return luigi.postgres.PostgresTarget(host = self.host, 
-                                    database = self.database, user = self.user,
-                                    password = self.password, table = self.table,
-                                    update_id = self.update_id) 
+    #def output(self):
+    #    return luigi.postgres.PostgresTarget(host = self.host, 
+    #                                database = self.database, user = self.user,
+    #                                password = self.password, table = self.table,
+    #                                update_id = self.update_id) 
 
 
 
