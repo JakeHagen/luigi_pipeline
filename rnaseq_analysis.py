@@ -5,7 +5,6 @@ import subprocess
 import os
 import rpy2.robjects as robjects                                            
 import pandas as pd 
-import sqlalchemy
 
 class parameters(luigi.Task):
     """class to take all parameters
@@ -41,7 +40,7 @@ class parameters(luigi.Task):
     stranded = luigi.IntParameter(default = 0)
     paried = luigi.IntParameter(default = 0)                                            
     cores = luigi.IntParameter(default = 6)    
-
+    exp_name = luigi.Parameter(default = "DCPS_knockdown_mRNA_ensembl137")
 
 class fastqs(luigi.Task):
     
@@ -215,27 +214,30 @@ class all_featureCounts(luigi.Task):
         counts_dict = self.input()
         return counts_dict
 
-class count_matrix_postgresql(luigi.postgres.CopyToTable):
+class luigi_count_matrix_postgres(luigi.postgres.CopyToTable):
     host = 'localhost'
     database = 'RNA'
     user = 'hagenj02'
-    password = 'REDACTED'
-    table = 'test'
+    password = 'postgresPass4'
+    table = parameters().exp_name
         
-    columns = [("Gene", "TEXT"),
-               ("c13", "INT"),
-               ("c14", "INT"),
-               ("c15", "INT"),
-               ("s01", "INT"),                                                  
-               ("s02", "INT"),                                                  
-               ("s03", "INT")]
+    #columns = [("Gene", "TEXT")]
+    #columns = [name for name in self.input()]                  
+    #print(self.input())
 
     def requires(self):
         return all_featureCounts()
-
-    def rows(self):
-        
-        sample_names = [x for x in self.input()]
+    
+    #columns = [("Gene", "TEXT")]                                               
+    #columns = [name for name in self.input()]                                  
+    def column(self):
+        col = [("Gene", "TEXT")]
+        col += [(name, "INT") for name in self.input()] 
+        return col
+    columns = column()
+    #columns = self.column()
+    print(self.input())
+    def rows(self): 
         count_files = [self.input()[y].path for y in self.input()]
         pandas_files = [
                         pd.read_table(self.input()[name].path, 
@@ -249,18 +251,9 @@ class count_matrix_postgresql(luigi.postgres.CopyToTable):
                         ]
         count_table = pd.concat(pandas_files, axis = 1).sort_index(axis=1)
         count_table = count_table.to_records()
-        print(count_table[0])
+        
         for row in count_table:
             yield(row)
-        #engine = sqlalchemy.create_engine('postgresql://hagenj02:REDACTED@localhost/RNA')
-        #count_table.to_sql('test', engine, if_exists = 'replace')
-
-    #def output(self):
-    #    return luigi.postgres.PostgresTarget(host = self.host, 
-    #                                database = self.database, user = self.user,
-    #                                password = self.password, table = self.table,
-    #                                update_id = self.update_id) 
-
 
 
 class diff_exp_analysis(luigi.Task):
