@@ -41,7 +41,7 @@ class parameters(luigi.Task):
     paried = luigi.IntParameter(default = 0)                                            
     cores = luigi.IntParameter(default = 6)    
     exp_name = luigi.Parameter(default = "DCPS_knockdown_mRNA_ensembl137")
-
+    password = luigi.Parameter()
 class fastqs(luigi.Task):
     
     def requires(self):
@@ -218,7 +218,7 @@ class luigi_count_matrix_postgres(luigi.postgres.CopyToTable):
     host = 'localhost'
     database = 'RNA'
     user = 'hagenj02'
-    password = 'postgresPass4'
+    password = parameters().password
     table = parameters().exp_name
         
     #columns = [("Gene", "TEXT")]
