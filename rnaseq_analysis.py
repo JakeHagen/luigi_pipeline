@@ -41,7 +41,8 @@ class parameters(luigi.Task):
     paried = luigi.IntParameter(default = 0)                                            
     cores = luigi.IntParameter(default = 6)    
     exp_name = luigi.Parameter(default = "DCPS_knockdown_mRNA_ensembl137")
-    password = luigi.Parameter()
+    password = luigi.Parameter(default = "postgresPass4")
+
 class fastqs(luigi.Task):
     
     def requires(self):
@@ -221,22 +222,21 @@ class luigi_count_matrix_postgres(luigi.postgres.CopyToTable):
     password = parameters().password
     table = parameters().exp_name
         
-    #columns = [("Gene", "TEXT")]
-    #columns = [name for name in self.input()]                  
-    #print(self.input())
+    columns = [("Gene", "TEXT")]
+    columns += [(name, "INT") for name in all_featureCounts().output()]                  
 
     def requires(self):
         return all_featureCounts()
     
     #columns = [("Gene", "TEXT")]                                               
     #columns = [name for name in self.input()]                                  
-    def column(self):
-        col = [("Gene", "TEXT")]
-        col += [(name, "INT") for name in self.input()] 
-        return col
-    columns = column()
+    #def column(self):
+    #    col = [("Gene", "TEXT")]
+    #    col += [(name, "INT") for name in self.input()] 
+    #    return col
+    #self.columns = column()
     #columns = self.column()
-    print(self.input())
+    #print(self.input())
     def rows(self): 
         count_files = [self.input()[y].path for y in self.input()]
         pandas_files = [
