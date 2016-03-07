@@ -2,73 +2,54 @@ import luigi
 import luigi.postgres
 import psycopg2
 import subprocess
-import os
-import rpy2.robjects as robjects                                            
+import os                                         
 import pandas as pd 
+import datetime
 
-class parameters(luigi.Task):
-    """class to take all parameters
-    fastq_file needs to be in the format specified below, if the experiment is 
-    paired end, the second fastq file should be after the first, only seperated 
-    by a space
-    If there are multiple files, seperate by comma without space
-    Single space seperates mates
-    Single comma seperates multiple files
-    s01:/sc/orga/projects/argmac01a/QC_C211.B857_huh7_DCPS.SE.RNASeqRibozero.RAPiD.Human/fastqs/lsi1_CAGATC_L008_R1_001.C6673ACXX.fastq.gz
-    s02:/sc/orga/projects/argmac01a/QC_C211.B857_huh7_DCPS.SE.RNASeqRibozero.RAPiD.Human/fastqs/lsi2_ATCACG_L008_R1_001.C6673ACXX.fastq.gz
-    s03:/sc/orga/projects/argmac01a/QC_C211.B857_huh7_DCPS.SE.RNASeqRibozero.RAPiD.Human/fastqs/lsi3_TCGGCA_L008_R1_001.C6673ACXX.fastq.gz
-    """
+class parameters(luigi.Config):
+    ''' 
+    Class to contain all parameters. Most of these will need to be set from luigi.cfg file in working directory, 
+    which is good because it acts as a log for parameters of experiment
+    '''
     
-    fastq_file = luigi.Parameter(
-                    default = '/hpc/users/hagenj02/luigi_pipeline/fastqfile')
-    
-    wkdir = luigi.Parameter(default = os.getcwd())
-
-    genome_fasta = luigi.Parameter(
-            default = '/sc/orga/projects/Houton_Sander/genomes/ensembl37/'
-                        'Homo_sapiens.GRCh37.75.dna.primary_assembly.fa'
-                                   )
-    genome_gtf = luigi.Parameter(
-            default = '/sc/orga/projects/Houton_Sander/genomes/ensembl37/'
-                        'Homo_sapiens.GRCh37.75.gtf'
-                                 )
-    star_genome_folder = luigi.Parameter(
-            default = '/sc/orga/projects/Houton_Sander/genomes/ensembl37/'
-                        'star_genome_ensembl37_99'
-                                         )
+    fastqs = luigi.Parameter(default = None)
+    exp_dir = luigi.Parameter(default = os.getcwd())
+    genome_fasta = luigi.Parameter(default = None)
+    genome_gtf = luigi.Parameter(default = None)
+    star_genome_folder = luigi.Parameter(default = None)
     read_length = luigi.IntParameter(default = 100)
-    stranded = luigi.IntParameter(default = 0)
+    stranded = luigi.BoolParameter(default = False)
     paried = luigi.IntParameter(default = 0)                                            
     cores = luigi.IntParameter(default = 6)    
-    exp_name = luigi.Parameter(default = "DCPS_knockdown_mRNA_ensembl137")
-    password = luigi.Parameter(default = "postgresPass4")
+    exp_name = luigi.Parameter(default = datetime.date.today().strftime("%B%d,%Y"))
+    password = luigi.Parameter(default = "none")
+    star_genome_index = luigi.Parameter(default = None)    
+    star_align = luigi.Parameter(default = None)
+
 
 class fastqs(luigi.Task):
-    
-    def requires(self):
-        return parameters()
-    
+    '''Takes fastqs from parameters (specified in python.cfg) and
+       returns dictionary with sample name and luigi.LocalTarget for the fastq
+    '''
+
     def run(self):    
         fastq_dict = {}
-        with open(parameters().fastq_file) as f:
-            for line in f:
-                sample,path = line.strip().split(":")
-                fastq_dict[sample] = path
+        for line in parameters().fastqs.splitlines():
+            sample, path = line.split(":")
+            fastq_dict[sample] = path
         return fastq_dict
     
     def output(self):
         fastq_dict = self.run()
-        return {sample:luigi.LocalTarget(path) for sample,path in fastq_dict.items()} 
+        return {sample:luigi.LocalTarget(path) for sample, path in fastq_dict.items()} 
 
 
 class index_STAR_genome(luigi.Task):
     
-    def requires(self):
-        return parameters()
-
     def run(self):
         if not os.path.exists(parameters().star_genome_folder):
             os.makedirs(parameters().star_genome_folder) 
+        os.chdir(parameters().star_genome_folder)
         star_command = [
                         'STAR',
                         '--runThreadN %d' % parameters().cores,
@@ -76,60 +57,54 @@ class index_STAR_genome(luigi.Task):
                         '--genomeDir %s' % parameters().star_genome_folder,
                         '--genomeFastaFiles %s' % parameters().genome_fasta,
                         '--sjdbGTFfile %s' % parameters().genome_gtf,
-                        '--sjdbOverhang %d' % (parameters.read_length - 1)
+                        '--sjdbOverhang %d' % (parameters().read_length - 1),
+                        '--readFilesCommand zcat'
                         ]
         star = subprocess.Popen(star_command)
         star.wait()
         if star.returncode != 0:
             subprocess.call(['rm -rf %s' % parameters().star_genome_folder])
         os.rename('Log.out', '%s/Log.out' % parameters().star_genome_folder)
+    
     def output(self):
         return luigi.LocalTarget('%s/Log.out' % parameters().star_genome_folder)
+"""
 
-
-class wk_dir(luigi.Task):
+class exp_dir(luigi.Task):
     
     def requires(self):
         return index_STAR_genome()
     
     def run(self):
-        os.makedirs(parameters().wkdir)
+        os.makedirs(parameters().exp_dir)
     
     def output(self):
-        return luigi.LocalTarget(parameters().wkdir)
+        return luigi.LocalTarget(parameters().exp_dir)
 
 
 class star_align(luigi.Task):
     
     sample = luigi.Parameter()
     file_location = luigi.Parameter()
+
     def requires(self):
-        return index_STAR_genome(), wk_dir(), fastqs()
+        return index_STAR_genome(), exp_dir(), fastqs()
 
     def run(self):
-        if not os.path.exists('%s/%s/star' % (parameters().wkdir, self.sample)):
-            os.makedirs('%s/%s/star' % (parameters().wkdir, self.sample))
-        s_command = [
-                'STAR',
-                    '--genomeDir %s' % parameters().star_genome_folder,
-                    #'--sjdbGTFfile %s' % genome_gtf,
-                    '--readFilesIn %s' % self.file_location.path,
-                    '--readFilesCommand zcat',
-                    '--runThreadN %d' % parameters().cores,
-                    '--outSAMmode Full',
-                    '--outReadsUnmapped Fastx',
-                    '--chimSegmentMin 15',
-                    '--chimJunctionOverhangMin 15',
-                    '--outSAMstrandField intronMotif',
-                    '--outFilterType BySJout',
-                    '--outFilterIntronMotifs RemoveNoncanonicalUnannotated',
-                    #'--genomeLoad LoadAndRemove',
-                    #'--limitBAMsortRAM 15000000000',
-                    '--outSAMtype BAM SortedByCoordinate',#Unsorted
-                    '--outFileNamePrefix %s/%s/star/%s.' % 
-                        (parameters().wkdir, self.sample, self.sample)
-                    ]
-        star = subprocess.Popen(s_command)
+        if not os.path.exists('%s/%s/star' % (parameters().exp_dir, self.sample)):
+            os.makedirs('%s/%s/star' % (parameters().exp_dir, self.sample))
+        star_command = [
+                        'STAR',
+                        '--genomeDir %s' % parameters().star_genome_folder,
+                        '--readFilesIn %s' % self.file_location.path,
+                        '--runThreadN %d' % parameters().cores,
+                        '--outFileNamePrefix %s/%s/star/%s.' %
+                            (parameters().exp_dir, self.sample, self.sample)
+                        ]
+        
+        for line in parameters().star_align.splitlines():
+            star_command.append(line)
+        star = subprocess.Popen(star_command)
         star.wait()
 
         '''Below removes folder if star command was unsuccessful 
@@ -139,19 +114,19 @@ class star_align(luigi.Task):
         '''
         if star.returncode != 0:
             subprocess.call(['rm', '-rf', '%s/%s/star' 
-                                % (parameters().wkdir, self.sample)])
+                                % (parameters().exp_dir, self.sample)])
         else:
             os.rename('%s/%s/star/%s.Aligned.sortedByCoord.out.bam' 
-                        % (parameters().wkdir, self.sample, self.sample), 
+                        % (parameters().exp_dir, self.sample, self.sample), 
                         '%s/%s/star/%s.bam' 
-                            % (parameters().wkdir, self.sample, self.sample))
+                            % (parameters().exp_dir, self.sample, self.sample))
     def output(self):
         return luigi.LocalTarget('%s/%s/star/%s.bam' 
-                                    % (parameters().wkdir, self.sample, self.sample))
+                                    % (parameters().exp_dir, self.sample, self.sample))
 
 
 class all_star_align(luigi.Task):
-    '''Requires splits out samples and runs star align concurrently
+    '''Requires splits out samples and runs star align for eacg sample,
     output is dictionary with sample name and luigi target of bam file
     '''
     def requires(self):
@@ -166,44 +141,48 @@ class all_star_align(luigi.Task):
 
 
 class featureCounts(luigi.Task):
-    sample = luigi.Parameter()
-    bam_file = luigi.Parameter()
     
+    sample = luigi.Parameter()
+    bam_file = luigi.Parameter()    
+
     def requires(self):
         return all_star_align()
 
     def run(self):
-        fc_wkdir = '%s/%s/featureCounts' % (parameters().wkdir, self.sample)
-        if not os.path.exists(fc_wkdir):
-            os.makedirs(fc_wkdir)
+        fC_dir = '%s/%s/featureCounts' % (parameters().exp_dir, self.sample)
+        if not os.path.exists(fC_dir):
+            os.makedirs(fC_dir)
         featureCounts_command = [
                                 'featureCounts',
-                                    '-F', 'GTF',
-                                    '-T', '%d' % cores,
-                                    '-s', '%d' % stranded,
-                                    '-a', '%s' % genome_gtf,
-                                    '-o', '%s/%s.prelim.counts' % (fc_wkdir,self.sample),
+                                    '-F GTF',
+                                    '-T %d' % cores,
+                                    '-s %d' % stranded,
+                                    '-a %s' % genome_gtf,
+                                    '-o %s/%s.prelim.counts' % (fC_dir, self.sample),
                                     self.bam_file.path
                                 ]
+        for line in parameters().featureCounts.splitlines():
+            featureCounts_command.append(line)
         fC = subprocess.Popen(featureCounts_command)
         fC.wait()
         if fC.returncode != 0:
-            subprocess.call(['rm', '-rf', fc_wkdir])
+            subprocess.call(['rm', '-rf', fC_dir])
         else:
-            os.rename('%s/%s.prelim.counts' % (fc_wkdir, self.sample), 
-                        '%s/%s.counts' % (fc_wkdir, self.sample))
-            os.rename('%s/%s.prelim.counts.summary' % (fc_wkdir, self.sample), 
-                        '%s/%s.counts.summary' % (fc_wkdir, self.sample))
+            os.rename('%s/%s.prelim.counts' % (fC_dir, self.sample), 
+                        '%s/%s.counts' % (fC_dir, self.sample))
+            os.rename('%s/%s.prelim.counts.summary' % (fC_dir, self.sample), 
+                        '%s/%s.counts.summary' % (fC_dir, self.sample))
 
     def output(self):
-        fc_wkdir = '%s/%s/featureCounts' % (parameters().wkdir, self.sample)
-        return luigi.LocalTarget('%s/%s.counts' % (fc_wkdir, self.sample))
+        fC_dir = '%s/%s/featureCounts' % (parameters().exp_dir, self.sample)
+        return luigi.LocalTarget('%s/%s.counts' % (fC_dir, self.sample))
 
 
 class all_featureCounts(luigi.Task):
     '''requires splits out samples and run featureCounts concurrently
     output returns dictionary with sample name and count file
     '''
+    
     def requires(self):
         bam_dict = all_star_align().output() 
         return {
@@ -216,6 +195,7 @@ class all_featureCounts(luigi.Task):
         return counts_dict
 
 class luigi_count_matrix_postgres(luigi.postgres.CopyToTable):
+    
     host = 'localhost'
     database = 'RNA'
     user = 'hagenj02'
@@ -228,15 +208,6 @@ class luigi_count_matrix_postgres(luigi.postgres.CopyToTable):
     def requires(self):
         return all_featureCounts()
     
-    #columns = [("Gene", "TEXT")]                                               
-    #columns = [name for name in self.input()]                                  
-    #def column(self):
-    #    col = [("Gene", "TEXT")]
-    #    col += [(name, "INT") for name in self.input()] 
-    #    return col
-    #self.columns = column()
-    #columns = self.column()
-    #print(self.input())
     def rows(self): 
         count_files = [self.input()[y].path for y in self.input()]
         pandas_files = [
@@ -254,57 +225,7 @@ class luigi_count_matrix_postgres(luigi.postgres.CopyToTable):
         
         for row in count_table:
             yield(row)
-
-
-class diff_exp_analysis(luigi.Task):
-    
-    def requires(self):
-        return all_featureCounts()
-
-    def run(self):
-        pandas2ri.activate()
-        r = robjects.r
-        robjects.globalenv['experimentGroups'] = robjects.StrVector(experiment_group)
-       
-        robjects.globalenv['countTable'] = pandas2ri.py2ri(count_table)
-        
-        limma = robjects.r('''
-                library("limma")
-                library("edgeR")
-                experimentGroups <- c("c13", "c14", "c15", "s01", "s02", "s03")
-                design <- model.matrix(~0+factor(experimentGroups))
-                colnames(design) <- c(unique(experimentGroups))
-                
-                countTable <- read.csv("counts")
-                rownames(countTable) <- countTable$Gene
-                countTable <- countTable[c(2,3,4,5,6,7)]
-                t <- DGEList(countTable, group = experimentGroups)
-
-                keep <- rowSums(cpm(t)>1) >= 3  
-                y <- t[keep,] #throw out genes that do not have at least one cpm in at least 3 samples 
-
-                dge <- calcNormFactors(y) #Use TMM normalization to correct for library size
-                v <- voom(dge, design=design,plot=FALSE) #Voom transformation, convert to log2CPM and associate a weight based on variance
-
-                fit <- lmFit(v,design = design) #Fit glm model
-                contrast.matrix <- makeContrasts(siRNA-control, levels=design)#Contrast matrix for constrasts of interest
-                fit2 <- contrasts.fit(fit,contrast.matrix)
-                fit2 <- eBayes(fit2)
-
-                # Output list of all genes for each contrast that had counts
-                # Adjusted p values by BH, (BH is default)
-                siRNA_control_full <- topTable(fit2, number = 200000, coef=1)
-                siRNA_control_full$gene <- rownames(siRNA_control_full)
-                siRNA_control_padj.05 <- topTable(fit2, number = 200000, coef=1, adjust="BH", p.value = .1)
-                write.table(siRNA_control_padj.05, file = "/hpc/users/hagenj02/luigi_pipeline/deg_test.txt", col.names = NA, sep = "\t", quote = FALSE)
-            ''')
-        limma()
-        #r['source']("/hpc/users/hagenj02/luigi_pipeline/script.R")
-    def output(self):
-        return luigi.LocalTarget('/hpc/users/hagenj02/luigi_pipeline/deg_test.txt')
-        
-    #def output():
-    #    return [self.input()[y].path for y in self.input()]
+"""
 
 if __name__ == '__main__':
     luigi.run()
