@@ -22,7 +22,7 @@ class parameters(luigi.Config):
     paried = luigi.IntParameter(default = 0)                                            
     cores = luigi.IntParameter(default = 6)    
     exp_name = luigi.Parameter(default = datetime.date.today().strftime("%B%d,%Y"))
-    password = luigi.Parameter(default = "none")
+    password = luigi.Parameter(default = None)
     star_genome_index = luigi.Parameter(default = None)    
     star_align = luigi.Parameter(default = None)
 
@@ -58,7 +58,6 @@ class index_STAR_genome(luigi.Task):
                         '--genomeFastaFiles %s' % parameters().genome_fasta,
                         '--sjdbGTFfile %s' % parameters().genome_gtf,
                         '--sjdbOverhang %d' % (parameters().read_length - 1),
-                        '--readFilesCommand zcat'
                         ]
         star = subprocess.Popen(star_command)
         star.wait()
@@ -68,7 +67,7 @@ class index_STAR_genome(luigi.Task):
     
     def output(self):
         return luigi.LocalTarget('%s/Log.out' % parameters().star_genome_folder)
-"""
+
 
 class exp_dir(luigi.Task):
     
@@ -225,7 +224,7 @@ class luigi_count_matrix_postgres(luigi.postgres.CopyToTable):
         
         for row in count_table:
             yield(row)
-"""
+
 
 if __name__ == '__main__':
     luigi.run()
