@@ -22,10 +22,14 @@ class parameters(luigi.Config):
     paried = luigi.IntParameter(default = 0)                                            
     cores = luigi.IntParameter(default = 6)    
     exp_name = luigi.Parameter(default = datetime.date.today().strftime("%B%d,%Y"))
-    password = luigi.Parameter(default = None)
+    postgres_password = luigi.Parameter(default = None)
     star_genome_index = luigi.Parameter(default = None)    
     star_align = luigi.Parameter(default = None)
-
+    star_command = luigi.Parameter(default = None)
+    postgres_host = luigi.Parameter(default = 'localhost')
+    postgres_database = luigi.Parameter(default = 'RNA')
+    postgres_user = luigi.Parameter(default = 'hagenj02')
+    
 
 class fastqs(luigi.Task):
     '''Takes fastqs from parameters (specified in python.cfg) and
@@ -100,17 +104,17 @@ class star_align(luigi.Task):
                         '--outFileNamePrefix %s/%s/star/%s.' %
                             (parameters().exp_dir, self.sample, self.sample)
                         ]
-        
+        #Append the extra parameters we wont from the config file
         for line in parameters().star_align.splitlines():
             star_command.append(line)
         star = subprocess.Popen(star_command)
         star.wait()
 
-        '''Below removes folder if star command was unsuccessful 
-        (files remain when star fails)
-        renaming bam insures that if batch job gets cut while star is running
-        the task will not be marked as complete 
-        '''
+        #Below removes folder if star command was unsuccessful 
+        #(files remain when star fails)
+        #renaming bam insures that if batch job gets cut while star is running
+        #the task will not be marked as complete 
+        
         if star.returncode != 0:
             subprocess.call(['rm', '-rf', '%s/%s/star' 
                                 % (parameters().exp_dir, self.sample)])
@@ -138,7 +142,47 @@ class all_star_align(luigi.Task):
         bam_dict = self.input()
         return bam_dict 
 
+class filter_unassigned_mapped_reads(luigi.Task):
+    
+    sample = luigi.Parameter()
+    bam_file = luigi.Parameter()
 
+    def requires(self):
+        return all_star_align()
+
+    def run(self):
+        os.chdir('%s/%s' % (parameters().exp_dir, self.sample))
+        intersect_command = [
+                            'bedtools', 
+                            'intersect', 
+                            '-a %s' % self.bam_file.path,
+                            '-b %s' % Parameters().genome_GTF,
+                            '-v', 
+                            '>', 
+                            '%s.intron.bam' % self.sample
+                            ]
+        
+        subprocess.call(intersect_command)     
+        #inter = subprocess.Popen(featureCounts_command)
+        #inter.wait()
+        #if inter.returncode != 0:
+        #    subprocess.call(['rm', '-rf', '%s.intron.bam])
+        #else:
+        #    os.rename('%s/%s.prelim.counts' % (fC_dir, self.sample), 
+        #                '%s/%s.counts' % (fC_dir, self.sample))
+        #    os.rename('%s/%s.prelim.counts.summary' % (fC_dir, self.sample), 
+        #                '%s/%s.counts.summary' % (fC_dir, self.sample))
+
+    def output(self):
+        return luigi.LocalTarget('%s/%s.counts' % (fC_dir, self.sample))
+
+    return bedtools intersect -a BAM -b GTF -v > SAMPLE.introns.bam
+    
+    def output(self):
+        return SAMPLE.introns.bam
+        
+
+"""
 class featureCounts(luigi.Task):
     
     sample = luigi.Parameter()
@@ -195,10 +239,10 @@ class all_featureCounts(luigi.Task):
 
 class luigi_count_matrix_postgres(luigi.postgres.CopyToTable):
     
-    host = 'localhost'
-    database = 'RNA'
-    user = 'hagenj02'
-    password = parameters().password
+    host = parameters().postgres_host
+    database = parameters().postgres_database
+    user = parameters().postgres_user
+    password = parameters().postgres_password
     table = parameters().exp_name
         
     columns = [("Gene", "TEXT")]
@@ -224,7 +268,7 @@ class luigi_count_matrix_postgres(luigi.postgres.CopyToTable):
         
         for row in count_table:
             yield(row)
-
+"""
 
 if __name__ == '__main__':
     luigi.run()
