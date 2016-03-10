@@ -142,47 +142,67 @@ class all_star_align(luigi.Task):
         bam_dict = self.input()
         return bam_dict 
 
+class extract_exon_annotation(luigi.Task):
+    eisa_dir = '%s/%s/eisa' % (parameters().exp_dir, self.sample)
+    
+    def run(self):
+        if not os.path.exists(self.eisa_dir):
+            os.makedirs(self.eisa_dir)
+        with open('%s/exons.gtf' % self.eisa_dir, 'a') as f:
+            for line in open(parameters().genome_gtf):
+                if "##" in line:
+                    print(line, file = f)
+                else:
+                    cols = line.split()
+                    if cols[2] == 'exon':
+                        print(line, file = f)
+        #awk_command = ["awk", "'$3 == "exon"'", "%s" % parameters().genome_gtf, ">", "%s/exons.gtf" % eisa_dir]
+        #subprocess.call(awk_command)
+
+    def output(self):
+        return luigi.LocalTarget('%s/exons.gtf' % self.eisa_dir)
+
 class filter_unassigned_mapped_reads(luigi.Task):
     
     sample = luigi.Parameter()
-    bam_file = luigi.Parameter()
+    bam_file_path = luigi.Parameter()
+    exon_gtf = luigi.Parameters()
+    eisa_dir = '%s/%s/eisa' % (parameters().exp_dir, 'test')
 
     def requires(self):
-        return all_star_align()
+        return all_star_align(), extract_exon_annotation()
 
-    def run(self):
-        os.chdir('%s/%s' % (parameters().exp_dir, self.sample))
+    def run(self):        
         intersect_command = [
-                            'bedtools', 
-                            'intersect', 
-                            '-a %s' % self.bam_file.path,
-                            '-b %s' % Parameters().genome_GTF,
-                            '-v', 
-                            '>', 
-                            '%s.intron.bam' % self.sample
-                            ]
-        
+                           'bedtools', 
+                           'intersect', 
+                           '-a %s' % self.bam_file_path,
+                           '-b %s' % self.exon_gtf,
+                           '-v', 
+                           '>', 
+                           '%s.intron.bam' % self.sample
+                           ]
         subprocess.call(intersect_command)     
-        #inter = subprocess.Popen(featureCounts_command)
-        #inter.wait()
-        #if inter.returncode != 0:
-        #    subprocess.call(['rm', '-rf', '%s.intron.bam])
-        #else:
-        #    os.rename('%s/%s.prelim.counts' % (fC_dir, self.sample), 
-        #                '%s/%s.counts' % (fC_dir, self.sample))
-        #    os.rename('%s/%s.prelim.counts.summary' % (fC_dir, self.sample), 
-        #                '%s/%s.counts.summary' % (fC_dir, self.sample))
-
-    def output(self):
-        return luigi.LocalTarget('%s/%s.counts' % (fC_dir, self.sample))
-
-    return bedtools intersect -a BAM -b GTF -v > SAMPLE.introns.bam
-    
-    def output(self):
-        return SAMPLE.introns.bam
         
+    def output(self):
+        return luigi.LocalTarget('%s/%s.intron.bam' % (self.eisa_dir, self.sample))
+   
+
+class all_filter_unassigned_mapped_reads(luigi.Task):
+
+    def requires(self):
+        bam_dict = all_star_align().output() 
+        return {
+                s:filter_unassigned_mapped_reads(sample = s, bam_file_path = b.path) 
+                    for s,b in bam_dict.items()
+                }             
+
+    def output(self):
+        return self.input()
 
 """
+
+
 class featureCounts(luigi.Task):
     
     sample = luigi.Parameter()
