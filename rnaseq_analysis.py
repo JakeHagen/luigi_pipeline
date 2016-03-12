@@ -143,21 +143,19 @@ class all_star_align(luigi.Task):
         return bam_dict 
 
 class extract_exon_annotation(luigi.Task):
-    eisa_dir = '%s/%s/eisa' % (parameters().exp_dir, self.sample)
-    
+    eisa_dir = '%s/eisa' % parameters().exp_dir
+     
     def run(self):
         if not os.path.exists(self.eisa_dir):
             os.makedirs(self.eisa_dir)
         with open('%s/exons.gtf' % self.eisa_dir, 'a') as f:
             for line in open(parameters().genome_gtf):
                 if "##" in line:
-                    print(line, file = f)
+                    print(line, end = "", file = f)
                 else:
                     cols = line.split()
                     if cols[2] == 'exon':
-                        print(line, file = f)
-        #awk_command = ["awk", "'$3 == "exon"'", "%s" % parameters().genome_gtf, ">", "%s/exons.gtf" % eisa_dir]
-        #subprocess.call(awk_command)
+                        print(line, end = "", file = f)
 
     def output(self):
         return luigi.LocalTarget('%s/exons.gtf' % self.eisa_dir)
@@ -166,26 +164,23 @@ class filter_unassigned_mapped_reads(luigi.Task):
     
     sample = luigi.Parameter()
     bam_file_path = luigi.Parameter()
-    exon_gtf = luigi.Parameters()
-    eisa_dir = '%s/%s/eisa' % (parameters().exp_dir, 'test')
+    exon_gtf = extract_exon_annotation().output().path
 
     def requires(self):
         return all_star_align(), extract_exon_annotation()
 
     def run(self):        
+        eisa_sample_dir = '%s/eisa/%s' % (parameters().exp_dir, self.sample)
+        if not os.path.exists(eisa_sample_dir):
+            os.makedirs(eisa_sample_dir)   
         intersect_command = [
-                           'bedtools', 
-                           'intersect', 
-                           '-a %s' % self.bam_file_path,
-                           '-b %s' % self.exon_gtf,
-                           '-v', 
-                           '>', 
-                           '%s.intron.bam' % self.sample
+                           'bedtools', 'intersect', '-a', '%s' % self.bam_file_path, '-b', '%s' % self.exon_gtf, '-v'
                            ]
-        subprocess.call(intersect_command)     
-        
+        with open('%s/%s.intron.bam' % (eisa_sample_dir, self.sample), 'w') as f:
+            subprocess.call(intersect_command, stdout=f)
     def output(self):
-        return luigi.LocalTarget('%s/%s.intron.bam' % (self.eisa_dir, self.sample))
+        eisa_sample_dir = '%s/eisa/%s' % (parameters().exp_dir, self.sample)
+        return luigi.LocalTarget('%s/%s.intron.bam' % (eisa_sample_dir, self.sample))
    
 
 class all_filter_unassigned_mapped_reads(luigi.Task):
@@ -200,13 +195,12 @@ class all_filter_unassigned_mapped_reads(luigi.Task):
     def output(self):
         return self.input()
 
-"""
 
 
 class featureCounts(luigi.Task):
     
     sample = luigi.Parameter()
-    bam_file = luigi.Parameter()    
+    bam_file_path = luigi.Parameter()    
 
     def requires(self):
         return all_star_align()
@@ -215,30 +209,25 @@ class featureCounts(luigi.Task):
         fC_dir = '%s/%s/featureCounts' % (parameters().exp_dir, self.sample)
         if not os.path.exists(fC_dir):
             os.makedirs(fC_dir)
-        featureCounts_command = [
-                                'featureCounts',
-                                    '-F GTF',
-                                    '-T %d' % cores,
-                                    '-s %d' % stranded,
-                                    '-a %s' % genome_gtf,
-                                    '-o %s/%s.prelim.counts' % (fC_dir, self.sample),
-                                    self.bam_file.path
-                                ]
-        for line in parameters().featureCounts.splitlines():
-            featureCounts_command.append(line)
-        fC = subprocess.Popen(featureCounts_command)
-        fC.wait()
-        if fC.returncode != 0:
-            subprocess.call(['rm', '-rf', fC_dir])
-        else:
-            os.rename('%s/%s.prelim.counts' % (fC_dir, self.sample), 
-                        '%s/%s.counts' % (fC_dir, self.sample))
-            os.rename('%s/%s.prelim.counts.summary' % (fC_dir, self.sample), 
-                        '%s/%s.counts.summary' % (fC_dir, self.sample))
+        featureCounts_command = 'featureCounts -f -t exon -T %d -g gene_id -a %s -o %s/%s.exon.counts %s' % (parameters().cores, parameters().genome_gtf, fC_dir, self.sample, self.bam_file_path)
+                                
+        #for line in parameters().featureCounts.splitlines():
+        #    featureCounts_command.append(line)
+        #fC = subprocess.Popen(featureCounts_command)
+        #### THIS IS THE INSECURE WAY TO USE SUBPROCESS, WILL NEED TO BE CHANGED ONCE I CAN GET THE OTHER WAY TO WORK
+        subprocess.call(featureCounts_command, shell = True)
+        #fC.wait()
+        #if fC.returncode != 0:
+            #subprocess.call(['rm', '-rf', fC_dir])
+        #else:
+            #os.rename('%s/%s.prelim.exon.counts' % (fC_dir, self.sample), 
+            #            '%s/%s.exon.counts' % (fC_dir, self.sample))
+            #os.rename('%s/%s.prelim.exon.counts.summary' % (fC_dir, self.sample), 
+            #            '%s/%s.exon.counts.summary' % (fC_dir, self.sample))
 
     def output(self):
         fC_dir = '%s/%s/featureCounts' % (parameters().exp_dir, self.sample)
-        return luigi.LocalTarget('%s/%s.counts' % (fC_dir, self.sample))
+        return luigi.LocalTarget('%s/%s.exon.counts' % (fC_dir, self.sample))
 
 
 class all_featureCounts(luigi.Task):
@@ -249,14 +238,14 @@ class all_featureCounts(luigi.Task):
     def requires(self):
         bam_dict = all_star_align().output() 
         return {
-                s:featureCounts(sample = s, bam_file = b.path) 
+                s:featureCounts(sample = s, bam_file_path = b.path) 
                     for s,b in bam_dict.items()
                 }             
 
     def output(self):
         counts_dict = self.input()
         return counts_dict
-
+"""
 class luigi_count_matrix_postgres(luigi.postgres.CopyToTable):
     
     host = parameters().postgres_host
