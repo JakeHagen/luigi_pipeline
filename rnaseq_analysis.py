@@ -25,9 +25,8 @@ class parameters(luigi.Config):
     cores = luigi.IntParameter(default = 6)    
     exp_name = luigi.Parameter(default = datetime.date.today().strftime("%B%d,%Y"))
     postgres_password = luigi.Parameter(default = None)
-    star_genome_index = luigi.Parameter(default = None)    
     star_align = luigi.Parameter(default = None)
-    star_command = luigi.Parameter(default = None)
+    star_index = luigi.Parameter(default = None)
     postgres_host = luigi.Parameter(default = 'localhost')
     postgres_database = luigi.Parameter(default = 'RNA')
     postgres_user = luigi.Parameter(default = 'hagenj02')
@@ -65,14 +64,12 @@ class index_star_genome(luigi.Task):
                         '--sjdbGTFfile %s' % parameters().genome_gtf,
                         '--sjdbOverhang %d' % (parameters().read_length - 1),
                         ]
-        star = subprocess.Popen(star_command)
-        star.wait()
-        if star.returncode != 0:
-            subprocess.call(['rm -rf %s' % parameters().star_genome_folder])
-        os.rename('Log.out', '%s/Log.out' % parameters().star_genome_folder)
-    
+        for line in parameters().star_index.splitlines():
+            star_command.append(line)
+        subprocess.call(star_command)
+            
     def output(self):
-        return luigi.LocalTarget('%s/Log.out' % parameters().star_genome_folder)
+        return luigi.LocalTarget('%s/Genome' % parameters().star_genome_folder)
 
 
 #class exp_dir(luigi.Task):
@@ -93,7 +90,7 @@ class star_align(luigi.Task):
     file_location = luigi.Parameter()
 
     def requires(self):
-        return index_STAR_genome(), fastqs()#, exp_dir()
+        return index_star_genome(), fastqs()#, exp_dir()
 
     def run(self):
         if not os.path.exists('%s/%s/star' % (parameters().exp_dir, self.sample)):
@@ -161,7 +158,7 @@ class count_genes(luigi.Task):
     bam_file_path = luigi.Parameter()    
 
     def requires(self):
-        return all_star_align()
+        return split_group_star_align()
 
     def run(self):
         fC_dir = '%s/%s/featureCounts' % (parameters().exp_dir, self.sample)
@@ -186,7 +183,7 @@ class split_group_count_genes(luigi.Task):
     '''
     
     def requires(self):
-        bam_dict = all_star_align().output() 
+        bam_dict = split_group_star_align().output() 
         return {
                 s:count_genes(sample = s, bam_file_path = b.path) 
                     for s,b in bam_dict.items()
@@ -194,7 +191,7 @@ class split_group_count_genes(luigi.Task):
 
     def output(self):
         return self.input()
-
+"""
 class postgres_count_matrix(luigi.postgres.CopyToTable):
 
     host = parameters().postgres_host
@@ -227,7 +224,7 @@ class postgres_count_matrix(luigi.postgres.CopyToTable):
 
         for row in count_table:
             yield(row)
-
+"""
 
 class extract_exon_annotation(luigi.Task):
 
@@ -255,7 +252,7 @@ class filter_nonexon(luigi.Task):
     exon_gtf = extract_exon_annotation().output().path
 
     def requires(self):
-        return all_star_align(), extract_exon_annotation()
+        return split_group_star_align(), extract_exon_annotation()
 
     def run(self):
         eisa_sample_dir = '%s/eisa/%s' % (parameters().exp_dir, self.sample)
@@ -275,7 +272,7 @@ class filter_nonexon(luigi.Task):
 class split_group_filter_nonexon(luigi.Task):
 
     def requires(self):
-        bam_dict = all_star_align().output()
+        bam_dict = split_group_star_align().output()
         return {
                 s:filter_nonexon(sample = s, bam_file_path = b.path)
                     for s,b in bam_dict.items()
@@ -291,7 +288,7 @@ class count_introns(luigi.Task):
     bam_file_path = luigi.Parameter()
 
     def requires(self):
-        return split_group_nonexon()
+        return split_group_filter_nonexon()
 
     def run(self):
         eisa_sample_dir = '%s/eisa/%s' % (parameters().exp_dir, self.sample)
@@ -315,7 +312,7 @@ class split_group_count_introns(luigi.Task):
     def requires(self):
         bam_dict = split_group_filter_nonexon().output()
         return {
-                s:counting_introns(sample = s, bam_file_path = b.path)
+                s:count_introns(sample = s, bam_file_path = b.path)
                     for s,b in bam_dict.items()
                 }
 
