@@ -148,51 +148,11 @@ class sg_gene_counter(split_group):
     task = luigi.TaskParameter(gene_counter)
 
 class exon_counter(luigi.Task):
-    feature = 'gene'
+    feature = 'exon'
 
 class sg_exon_counter(split_group):
     input_task = luigi.TaskParameter(sg_star_align)
     task = luigi.TaskParameter(exon_counter)
-"""
-class count_genes(luigi.Task):
-    
-    sample = luigi.Parameter()
-    bam_file_path = luigi.Parameter()    
-
-    def requires(self):
-        return split_group_star_align()
-
-    def run(self):
-        fC_dir = '%s/%s/featureCounts' % (parameters().exp_dir, self.sample)
-        if not os.path.exists(fC_dir):
-            os.makedirs(fC_dir)
-        
-        featureCounts_command = ['featureCounts', '-T', '%d' % parameters().cores, 
-                                    '-t', 'gene', '-g', 'gene_id', 
-                                    '-o', '%s/%s.gene.counts' % (fC_dir, self.sample),
-                                    '-a', parameters().genome_gtf, 
-                                    self.bam_file_path]
-        subprocess.call(featureCounts_command)
-        
-    def output(self):
-        fC_dir = '%s/%s/featureCounts' % (parameters().exp_dir, self.sample)
-        return luigi.LocalTarget('%s/%s.gene.counts' % (fC_dir, self.sample))
-
-
-class split_group_count_genes(luigi.Task):
-    '''requires splits out samples and run featureCounts concurrently
-    output returns dictionary with sample name and count file
-    '''
-    
-    def requires(self):
-        bam_dict = split_group_star_align().output() 
-        return {
-                s:count_genes(sample = s, bam_file_path = b.path) 
-                    for s,b in bam_dict.items()
-                }             
-
-    def output(self):
-        return self.input()
 
 
 class extract_exon_annotation(luigi.Task):
@@ -240,56 +200,19 @@ class filter_nonexon(luigi.Task):
         return luigi.LocalTarget('%s/%s.intron.bam' % (eisa_sample_dir, self.sample))
 
 
-class split_group_filter_nonexon(luigi.Task):
-
-    def requires(self):
-        bam_dict = split_group_star_align().output()
-        return {
-                s:filter_nonexon(sample = s, bam_file_path = b.path)
-                    for s,b in bam_dict.items()
-                }
-
-    def output(self):
-        return self.input()
+class sg_filter_nonexon(split_group):
+    input_task = luigi.TaskParameter(sg_star_align)
+    task = luigi.TaskParameter(filter_nonexon)
 
 
-class count_introns(luigi.Task):
+class intron_counter(gene_counter):
+    require = luigi.TaskParameter(sg_filter_nonexon)
 
-    sample = luigi.Parameter()
-    bam_file_path = luigi.Parameter()
 
-    def requires(self):
-        return split_group_filter_nonexon()
+class sg_intron_counter(split_group):
+    input_task = luigi.TaskParameter(sg_filter_nonexon)
+    task = luigi.TaskParameter(intron_counter)
 
-    def run(self):
-        eisa_sample_dir = '%s/eisa/%s' % (parameters().exp_dir, self.sample)
-        
-        featureCounts_command = ['featureCounts', '-T', '%d' % parameters().cores,
-                                    '-t', 'gene', '-g', 'gene_id',
-                                    '-o', '%s/%s.intron.counts' % (eisa_sample_dir, self.sample),
-                                    '-a', parameters().genome_gtf,
-                                    self.bam_file_path]
-        subprocess.call(featureCounts_command)
-        
-    def output(self):
-        eisa_sample_dir = '%s/eisa/%s' % (parameters().exp_dir, self.sample)
-        return luigi.LocalTarget('%s/%s.intron.counts' % (eisa_sample_dir, self.sample))
-        
-
-class split_group_count_introns(luigi.Task):
-    '''requires splits out samples and run featureCounts concurrently
-    output returns dictionary with sample name and count file
-    '''
-
-    def requires(self):
-        bam_dict = split_group_filter_nonexon().output()
-        return {
-                s:count_introns(sample = s, bam_file_path = b.path)
-                    for s,b in bam_dict.items()
-                }
-
-    def output(self):
-        return self.input()
 
 class extract_protein_coding_annotation(luigi.Task):
 
@@ -299,8 +222,6 @@ class extract_protein_coding_annotation(luigi.Task):
                 if "##" in line:
                     print(line, end = "", file = f)
                 else:
-                    #cols = line.split()
-                    #if cols[2] == 'gene' and 'protein_coding' in line:
                     if 'protein_coding' in line:
                         print(line, end = "", file = f)
 
@@ -308,144 +229,43 @@ class extract_protein_coding_annotation(luigi.Task):
         return luigi.LocalTarget('%s/protein_coding.gtf' % parameters().exp_dir)
 
 
-class count_protein_coding_genes(luigi.Task):
-
-    sample = luigi.Parameter()
-    bam_file_path = luigi.Parameter()
-
-    def requires(self):
-        return split_group_star_align(), extract_protein_coding_annotation()
-
-    def run(self):
-        fC_dir = '%s/%s/featureCounts' % (parameters().exp_dir, self.sample)
-        if not os.path.exists(fC_dir):
-            os.makedirs(fC_dir)
-        featureCounts_command = 'featureCounts -T %d -t gene -g gene_id -o %s/%s.protein_coding_gene.counts -a %s/protein_coding.gtf %s' \
-                                    % (parameters().cores, fC_dir, self.sample, parameters().exp_dir, self.bam_file_path)
-        #featureCounts_command = ['featureCounts', '-T', '%d' % parameters().cores,
-        #                            '-t', 'gene', '-g', 'gene_id',
-        #                            '-o', '%s/%s.protein_coding_gene.counts' % (fC_dir, self.sample),
-        #                            '-a', '%s/protein_coding.gtf' % parameters().exp_dir,
-        #                            self.bam_file_path]
-        subprocess.call(featureCounts_command, shell = True)
-
-    def output(self):
-        fC_dir = '%s/%s/featureCounts' % (parameters().exp_dir, self.sample)
-        return luigi.LocalTarget('%s/%s.protein_coding_gene.counts' % (fC_dir, self.sample))
-
-
-class split_group_count_protein_coding_genes(luigi.Task):
-    '''requires splits out samples and run featureCounts concurrently
-    output returns dictionary with sample name and count file
-    '''
-
-    def requires(self):
-        bam_dict = split_group_star_align().output()
-        return {
-                s:count_protein_coding_genes(sample = s, bam_file_path = b.path)
-                    for s,b in bam_dict.items()
-                }
-
-    def output(self):
-        return self.input()
-
-class temp_intron(luigi.Task):
-
-    sample = luigi.Parameter()
-    bam_file_path = luigi.Parameter()
-    annotation = luigi.Parameter()
-    feature = luigi.Paramerer()
-    file_name = luigi.Parameter()
+class protein_coding_gene_counter(gene_counter):
+    require = luigi.TaskParameter(extract_protein_coding_annotation)
+    annotation =luigi.Parameter(extract_protein_coding_annotation().output().path)
     
-    def requires(self):
-        return split_group_star_align(), extract_protein_coding_annotation()
 
-    def run(self):
-        fC_dir = '%s/%s/featureCounts' % (parameters().exp_dir, self.sample)
-        if not os.path.exists(fC_dir):
-            os.makedirs(fC_dir)
-        featureCounts_command = 'featureCounts -T %d -t gene -g gene_id -o %s/%s.protein_coding_gene.counts -a %s/protein_coding.gtf %s' % \
-                                (parameters().cores, fC_dir, self.sample, parameters().exp_dir, self.bam_file_path)
-        #featureCounts_command = ['featureCounts', '-T', '%d' % parameters().cores,
-        #                            '-t', 'gene', '-g', 'gene_id',
-        #                            '-o', '%s/%s.protein_coding_gene.counts' % (fC_dir, self.sample),
-        #                            '-a', '%s/protein_coding.gtf' % parameters().exp_dir,
-        #                            self.bam_file_path]
-        subprocess.call(featureCounts_command, shell = True)
-
-    def output(self):
-        fC_dir = '%s/%s/featureCounts' % (parameters().exp_dir, self.sample)
-        return luigi.LocalTarget('%s/%s.protein_coding_gene_intron.counts' % (fC_dir, self.sample))
+class sg_protein_coding_gene_counter(split_group):
+    input_task = luigi.TaskParameter(sg_star_align)
+    task = luigi.TaskParameter(protein_coding_gene_counter)
 
 
-class split_group_feature_counter(luigi.Task):
-    '''requires splits out samples and run featureCounts concurrently
-    output returns dictionary with sample name and count file
-    '''
-    annotation = luigi.Parameter(default = parameters().genome_gtf
-    feature = luigi.Parameter(default = 'gene')
-    file_name = luigi.Parameter(default = 'gene')
-    requires_bam = luigi.TaskParamter(default = split_group_star_align())
-    requires_annotation = luigi.TaskParameter(default = None)
-    
-    def requires(self):
-        bam_dict = split_group_star_align().output()
-        return {
-                s:temp_intron(sample = s, bam_file_path = b.path)
-                    for s,b in bam_dict.items()
-                }
-
-    def output(self):
-        return self.input()
+class sg_protein_coding_gene_intron_counter(split_group):
+    input_task = luigi.TaskParameter(sg_filter_nonexon)
+    task = luigi.TaskParameter(protein_coding_gene_counter)
 
 
-class exon_counter(feature.counter):
+class postgres_count_matrix(luigi.Task):#postgres.CopyToTable):
 
-    feature = 'exon'
-
-class sg_exon_counter(split_group):
-    task = luigi.TaskParameter(exon_counter)
-
-class split_group(luigi.Task):
-    input_dict = luigi.Parameter(default = sg_star_align().output())
-    task = luigi.TaskParameter()
-
-    def requires(self):
-        return{s:task for s,f in self.input_dict.items()}
-    
-    def output(self):
-        return self.input()
-
-class sg_intron_counter(split_group):
-    input_dict = sg_star_align().output()
-    task = luigi.TaskParameter(feature_counter(annotation = parameters().genome_gtf, bam
-                                                 
-
-bam_file_path = luigi.Parameter()
-    annotation = luigi.Parameter()
-    feature = luigi.Paramerer()
-    file_name = luigi.Parameter()
-
-class postgres_count_matrix(luigi.postgres.CopyToTable):
-
-    exp_name = parameters().exp_name
-    password = luigi.Parameter(default = None, significant = False)
-    host = luigi.Parameter(default = 'localhost')
-    database = luigi.Parameter(default = 'RNA')
-    user = luigi.Parameter(default = 'hagenj02')
-    feature = luigi.Parameter(default = "Gene_protein_coding")
-    table= luigi.Parameter(default = '%s_intron_protein_coding' % exp_name)
-    feature_counter = luigi.TaskParameter(default = split_group_
+    #password = luigi.Parameter(significant = False)
+    #host = luigi.Parameter(default = 'localhost')
+    #database = luigi.Parameter(default = 'RNA')
+    #user = luigi.Parameter(default = 'hagenj02')
+    #feature = luigi.Parameter(default = "gene")
+    #table = luigi.Parameter(default = parameters().exp_name)
+    #feature_counter = luigi.TaskParameter(default = gene_counter)
     
     def cols(self):
         columns = [("Gene", "TEXT")]
-        columns += [(name, "INT") for name in split_group_temp_intron().output()]
+        columns += [(name, "INT") for name in gene_counter().output()]
         return columns
     
     columns = self.cols()
-    
+
+    def run(self):
+        print(self.columns)
+"""    
     def requires(self):
-        return split_group_temp_intron()
+        return self.feature_counter()
 
     def rows(self):
         count_files = [self.input()[y].path for y in self.input()]
@@ -460,7 +280,7 @@ class postgres_count_matrix(luigi.postgres.CopyToTable):
                         for name in self.input()
                         ]
         count_table = pd.concat(pandas_files, axis = 1).sort_index(axis=1)
-        count_table.to_csv("%s/%s_intron.csv" % (parameters().exp_dir, self.table))
+        count_table.to_csv("%s/%s.csv" % (parameters().exp_dir, self.table))
         count_table = count_table.to_records()
 
         for row in count_table:
