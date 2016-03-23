@@ -75,31 +75,28 @@ class star_align(luigi.Task):
     sample = luigi.Parameter()
     star_align = luigi.Parameter(default = "")    
 
-    def output_dir(self):
-        return '%s/%s/star' % (parameters().exp_dir, self.sample)
-
     def requires(self):
         return star_index(), fastqs(sample = self.sample)
 
     def run(self):
-        if not os.path.exists(self.output_dir()):
-            os.makedirs(self.output_dir())
+        if not os.path.exists('%s/%s/star' % (parameters().exp_dir, self.sample)):
+            os.makedirs('%s/%s/star' % (parameters().exp_dir, self.sample))
         star_command = [
                         'STAR',
                         '--genomeDir %s' % parameters().star_genome_folder,
                         '--readFilesIn %s' % self.input()[1].path,
                         '--runThreadN %d' % parameters().cores,
-                        '--outFileNamePrefix %s/%s.' %
-                            (self.output, self.sample)
+                        '--outFileNamePrefix %s/%s/star/%s.' %
+                            (parameters().exp_dir, self.sample, self.sample)
                         ]
         #Append the extra parameters we want from the config file
         for line in self.star_align.splitlines():
             star_command.append(line)
         subprocess.call(star_command)
-        os.rename('%s/%s.Aligned.sortedByCoord.out.bam' % (self.output_dir, self.sample), 
-                    '%s/%s.bam' % (self.output_dir(), self.sample))
+        os.rename('%s/%s/star/%s.Aligned.sortedByCoord.out.bam' % (parameters().exp_dir, self.sample, self.sample), 
+                    '%s/%s/star/%s.bam' % (parameters().exp_dir, self.sample, self.sample))
     def output(self):
-        return luigi.LocalTarget('%s/%s.bam' % (self.output_dir, self.sample))
+        return luigi.LocalTarget('%s/%s/star/%s.bam' % (parameters().exp_dir, self.sample, self.sample))
 
 
 class gene_counter(luigi.Task):
@@ -107,12 +104,13 @@ class gene_counter(luigi.Task):
     annotation = luigi.Parameter(default = parameters().genome_gtf)
     feature = luigi.Parameter(default = 'gene')
     require = luigi.TaskParameter(default = star_align)
-
+    output_name = luigi.Parameter(default = 'gene')
+    
     def output_dir(self):
         return  '%s/%s/counts' % (parameters().exp_dir, self.sample)
     
     def requires(self):
-        return require(sample = self.sample)
+        return self.require(sample = self.sample), self.require()
     
     def run(self):
         if not os.path.exists(self.output_dir()):
@@ -120,18 +118,19 @@ class gene_counter(luigi.Task):
         
         featureCounts_command = ['featureCounts', '-T', '%d' % parameters().cores,
                                     '-t', 'gene', '-g', 'gene_id',
-                                    '-o', '%s/%s.gene.counts' % (self.output_dir(), self.sample),
+                                    '-o', '%s/%s.%s.counts' % (self.output_dir(), self.sample, self.output_name),
                                     '-a', self.annotation,
                                     self.input().path]
         subprocess.call(featureCounts_command)
 
     def output(self):
-        return luigi.LocalTarget('%s/%s.gene.counts' % (self.output_dir(), self.sample))
+        return luigi.LocalTarget('%s/%s.%s.counts' % (self.output_dir(), self.output_name, self.sample))
 
 
-class exon_counter(luigi.Task):
+class exon_counter(gene_counter):
     feature = 'exon'
-
+    output_name = 'exon' 
+    
 
 class extract_exon_annotation(luigi.Task):
 
@@ -159,33 +158,34 @@ class filter_nonexon(luigi.Task):
     To be used to count reads that map to introns
     '''
     sample = luigi.Parameter()
-    exon_gtf = extract_exon_annotation().output().path
-
-    def eisa_sample_dir(self):
-        return '%s/eisa/%s' % (parameters().exp_dir, self.sample)
+    exon_gtf = luigi.Parameter(extract_exon_annotation().output().path)
 
     def requires(self):
         return star_align(self.sample), extract_exon_annotation()
 
     def run(self):
+        eisa_dir = '%s/eisa/%s' % (parameters().exp_dir, self.sample)
         bam_file = self.input()[0]
         
-        if not os.path.exists(self.eisa_sample_dir):
-            os.makedirs(self.eisa_sample_dir)
+        if not os.path.exists(eisa_dir):
+            os.makedirs(eisa_dir)
         
         intersect_command = [
             'bedtools', 'intersect', '-a', '%s' % bam_file.path, '-b', '%s' % self.exon_gtf, '-v'
                            ]
         
-        with open('%s/%s.intron.bam' % (self.eisa_sample_dir, self.sample), 'w') as f:
+        with open('%s/%s.intron.bam' % (eisa_dir, self.sample), 'w') as f:
             subprocess.call(intersect_command, stdout=f)
 
     def output(self):
-        return luigi.LocalTarget('%s/%s.intron.bam' % (self.eisa_sample_dir, self.sample))
+        eisa_dir = '%s/eisa/%s' % (parameters().exp_dir, self.sample)
+        return luigi.LocalTarget('%s/%s.intron.bam' % (eisa_dir, self.sample))
 
 
 class intron_counter(gene_counter):
     require = luigi.TaskParameter(filter_nonexon)
+    feature = 'intron'
+    output_name = 'intron'
 
 
 class extract_protein_coding_annotation(luigi.Task):
@@ -204,12 +204,14 @@ class extract_protein_coding_annotation(luigi.Task):
 
 
 class protein_coding_gene_counter(gene_counter):
-    annotation = luigi.Parameter(extract_protein_coding_annotation().output().path)
-    
+    annotation = extract_protein_coding_annotation().output().path
+    output_name = 'protein_coding'
+    require = luigi.TaskParameter(star_align, extract_protein_coding_annotation)
 
 class protein_coding_gene_intron(gene_counter):
-    annotation = luigi.Parameter(extract_protein_coding_annotation().output().path)
-    require = luigi.TaskParameter(filter_nonexon)
+    annotation = extract_protein_coding_annotation().output().path
+    require = luigi.TaskParameter(filter_nonexon, extract_protein_coding_annotation)
+    output_name = 'protein_coding_intron'
 
 
 class postgres_count_matrix(luigi.postgres.CopyToTable):
@@ -222,10 +224,10 @@ class postgres_count_matrix(luigi.postgres.CopyToTable):
     feature_counter = luigi.TaskParameter(default = gene_counter)
     
     columns = [("Gene", "TEXT")]
-    columns += [(name, "INT") for name in ['a01', 'b01']]
+    columns += [(name, "INT") for name in fastqs(sample = '').run()]
     
     def requires(self):
-        return {x:self.feature_counter(sample = x) for x in fastqs.run()}
+        return {x:self.feature_counter(sample = x) for x in fastqs(sample = '').run()}
 
     def rows(self):
         count_files = [self.input()[y].path for y in self.input()]
