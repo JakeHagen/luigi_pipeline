@@ -1,4 +1,5 @@
-#!/hpc/users/hagenj02/luigi_pipeline/vluigi/bin/python3.5
+#!/home/jake/.local/share/virtualenvs/luigi/bin/python3.5
+#####!/hpc/users/hagenj02/luigi_pipeline/vluigi/bin/python3.5
 
 import luigi
 import luigi.postgres
@@ -46,8 +47,11 @@ class fastqs(luigi.Task):
 
 
 class star_index(luigi.Task):
+    '''Index genome to be used with STAR aligner
 
-    star_index = luigi.Parameter(default = "")
+       More options can be passed to STAR by adding paramters to the config file
+    '''
+    star_index = luigi.Parameter(default = "", significant = False)
 
     def run(self):
         if not os.path.exists(parameters().star_genome_folder):
@@ -65,15 +69,21 @@ class star_index(luigi.Task):
         for line in self.star_index.splitlines():
             star_command.append(line)
         subprocess.call(star_command)
+        if not os.path.isfile('%s/Genome' % parameters().star_genome_folder):
+            raise OSError("star_index/Genome file could not be created")
 
     def output(self):
         return luigi.LocalTarget('%s/Genome' % parameters().star_genome_folder)
 
 
 class star_align(luigi.Task):
+    '''Align fastq to previously indexed genome
 
+       More options can be passed to STAR by adding parameters to the config file
+       The config file already contains default aligner options
+    '''
     sample = luigi.Parameter()
-    star_align = luigi.Parameter(default = "")
+    star_align = luigi.Parameter(default = "", significant = False)
 
     def requires(self):
         return star_index(), fastqs(sample = self.sample)
@@ -93,24 +103,30 @@ class star_align(luigi.Task):
         for line in self.star_align.splitlines():
             star_command.append(line)
         subprocess.call(star_command)
-        os.rename('%s/%s/star/%s.Aligned.sortedByCoord.out.bam' % (parameters().exp_dir, self.sample, self.sample),
-                    '%s/%s/star/%s.bam' % (parameters().exp_dir, self.sample, self.sample))
+        if not os.path.isfile('%s/%s/star/%s.Aligned.sortedByCoord.out.bam' % (parameters().exp_dir, self.sample, self.sample)):
+            raise OSError("STAR bam could not be created")
+
     def output(self):
-        return luigi.LocalTarget('%s/%s/star/%s.bam' % (parameters().exp_dir, self.sample, self.sample))
+        return luigi.LocalTarget('%s/%s/star/%s.Aligned.sortedByCoord.out.bam' % (parameters().exp_dir, self.sample, self.sample))
 
 
 class gene_counter(luigi.Task):
+    '''Use featureCounts from the subread package to count alignments that overlap
+       a gene.
+       This also serves as a base class for counting on different features besides genes
+    '''
     sample = luigi.Parameter()
     annotation = luigi.Parameter(default = parameters().genome_gtf)
     feature = luigi.Parameter(default = 'gene')
     require = luigi.TaskParameter(default = star_align)
     output_name = luigi.Parameter(default = 'gene')
+    bam_generator = luigi.TaskParameter(default = star_align)
 
     def output_dir(self):
         return  '%s/%s/counts' % (parameters().exp_dir, self.sample)
 
     def requires(self):
-        return self.require(sample = self.sample), self.require()
+        return self.require(sample = self.sample)
 
     def run(self):
         if not os.path.exists(self.output_dir()):
@@ -120,11 +136,11 @@ class gene_counter(luigi.Task):
                                     '-t', 'gene', '-g', 'gene_id',
                                     '-o', '%s/%s.%s.counts' % (self.output_dir(), self.sample, self.output_name),
                                     '-a', self.annotation,
-                                    self.input().path]
+                                    self.bam_generator(sample = self.sample).output().path]
         subprocess.call(featureCounts_command)
 
     def output(self):
-        return luigi.LocalTarget('%s/%s.%s.counts' % (self.output_dir(), self.output_name, self.sample))
+        return luigi.LocalTarget('%s/%s.%s.counts' % (self.output_dir(), self.sample, self.output_name))
 
 
 class exon_counter(gene_counter):
@@ -186,6 +202,7 @@ class intron_counter(gene_counter):
     require = luigi.TaskParameter(filter_nonexon)
     feature = 'intron'
     output_name = 'intron'
+    bam_generator = luigi.TaskParameter(default = filter_nonexon)
 
 
 class extract_protein_coding_annotation(luigi.Task):
@@ -206,22 +223,28 @@ class extract_protein_coding_annotation(luigi.Task):
 class protein_coding_gene_counter(gene_counter):
     annotation = extract_protein_coding_annotation().output().path
     output_name = 'protein_coding'
-    require = luigi.TaskParameter(star_align, extract_protein_coding_annotation)
 
-class protein_coding_gene_intron(gene_counter):
+    def requires(self):
+        return star_align(self.sample), extract_protein_coding_annotation()
+
+class protein_coding_gene_intron_counter(gene_counter):
     annotation = extract_protein_coding_annotation().output().path
-    require = luigi.TaskParameter(filter_nonexon, extract_protein_coding_annotation)
     output_name = 'protein_coding_intron'
 
+    def requires(self):
+        return filter_nonexon(self.sample), extract_protein_coding_annotation()
 
-class postgres_count_matrix(luigi.postgres.CopyToTable):
+def table_maker(feature):
+    return parameters().exp_name + '_' + feature
+
+class postgres_gene_count_matrix(luigi.postgres.CopyToTable):
     password = luigi.Parameter(significant = False)
-    host = luigi.Parameter(default = '104.236.30.149')
-    database = luigi.Parameter(default = 'postgres')
-    user = luigi.Parameter(default = 'postgres')
-    feature = luigi.Parameter(default = "gene")
-    table = luigi.Parameter(default = parameters().exp_name)
-    feature_counter = luigi.TaskParameter(default = gene_counter)
+    host = luigi.Parameter(significant = False)
+    database = luigi.Parameter(default = 'rna', significant = False)
+    user = luigi.Parameter(default = 'rna', significant = False)
+    #feature = luigi.Parameter(default = "gene")
+    table = luigi.Parameter(default = parameters().exp_name + '_' + 'gene_counts')
+    feature_counter = luigi.TaskParameter(default = gene_counter, significant = False)
 
     columns = [("Gene", "TEXT")]
     columns += [(name, "INT") for name in fastqs(sample = '').run()]
@@ -248,6 +271,30 @@ class postgres_count_matrix(luigi.postgres.CopyToTable):
         for row in count_table:
             yield(row)
 
+class postgres_exon_count_matrix(postgres_gene_count_matrix):
+    table = luigi.Parameter(default = parameters().exp_name + '_' + 'exon_counts')
+    feature_counter = exon_counter
+
+class postgres_protein_genes_count_matrix(postgres_gene_count_matrix):
+    table = luigi.Parameter(default = parameters().exp_name + '_' + 'protein_genes_counts')
+    feature_counter = protein_coding_gene_counter
+
+class postgres_intron_count_matrix(postgres_gene_count_matrix):
+    table = luigi.Parameter(default = parameters().exp_name + '_' + 'intron_counts')
+    feature_counter = intron_counter
+
+class postgres_protein_intron_count_matrix(postgres_gene_count_matrix):
+    table = luigi.Parameter(default = parameters().exp_name + '_' + 'intron_protein_counts')
+    feature_counter = protein_coding_gene_intron_counter
+
+class all_count_matrix(luigi.WrapperTask):
+    password = luigi.Parameter(significant = False)
+    def requires(self):
+        yield postgres_gene_count_matrix(self.password)
+        yield postgres_exon_count_matrix(self.password)
+        yield postgres_protein_genes_count_matrix(self.password)
+        yield postgres_intron_count_matrix(self.password)
+        yield postgres_protein_intron_count_matrix(self.password)
 
 if __name__ == '__main__':
     luigi.run()
