@@ -54,9 +54,11 @@ class star_index(luigi.Task):
     star_index = luigi.Parameter(default = "", significant = False)
 
     def run(self):
-        if not os.path.exists(parameters().star_genome_folder):
-            os.makedirs(parameters().star_genome_folder)
-        os.chdir(parameters().star_genome_folder)
+        try:
+             os.makedirs(parameters().star_genome_folder)
+        except OSError:
+            pass
+
         star_command = [
                         'STAR',
                         '--runThreadN %d' % parameters().cores,
@@ -69,6 +71,7 @@ class star_index(luigi.Task):
         for line in self.star_index.splitlines():
             star_command.append(line)
         subprocess.call(star_command)
+
         if not os.path.isfile('%s/Genome' % parameters().star_genome_folder):
             raise OSError("star_index/Genome file could not be created")
 
@@ -88,9 +91,15 @@ class star_align(luigi.Task):
     def requires(self):
         return star_index(), fastqs(sample = self.sample)
 
+    def output_dir(self):
+        return  '%s/%s/star' % (parameters().exp_dir, self.sample)
+
     def run(self):
-        if not os.path.exists('%s/%s/star' % (parameters().exp_dir, self.sample)):
-            os.makedirs('%s/%s/star' % (parameters().exp_dir, self.sample))
+        try:
+            os.makedirs(self.output_dir())
+        except OSError:
+            pass
+
         star_command = [
                         'STAR',
                         '--genomeDir %s' % parameters().star_genome_folder,
@@ -99,15 +108,15 @@ class star_align(luigi.Task):
                         '--outFileNamePrefix %s/%s/star/%s.' %
                             (parameters().exp_dir, self.sample, self.sample)
                         ]
-        #Append the extra parameters we want from the config file
         for line in self.star_align.splitlines():
             star_command.append(line)
         subprocess.call(star_command)
-        if not os.path.isfile('%s/%s/star/%s.Aligned.sortedByCoord.out.bam' % (parameters().exp_dir, self.sample, self.sample)):
-            raise OSError("STAR bam could not be created")
+
+        if not os.path.isfile('%s/%s.Aligned.sortedByCoord.out.bam' % (self.output_dir(), self.sample)):
+            raise OSError("STAR could not create %s bam file" % self.sample)
 
     def output(self):
-        return luigi.LocalTarget('%s/%s/star/%s.Aligned.sortedByCoord.out.bam' % (parameters().exp_dir, self.sample, self.sample))
+        return luigi.LocalTarget('%s/%s.Aligned.sortedByCoord.out.bam' % (self.output_dir, self.sample))
 
 
 class gene_counter(luigi.Task):
@@ -129,14 +138,17 @@ class gene_counter(luigi.Task):
         return self.require(sample = self.sample)
 
     def run(self):
-        if not os.path.exists(self.output_dir()):
+        try:
             os.makedirs(self.output_dir())
+        except OSError:
+            pass
 
+        bam_file = self.bam_generator(sample = self.sample).output().path
         featureCounts_command = ['featureCounts', '-T', '%d' % parameters().cores,
                                     '-t', 'gene', '-g', 'gene_id',
                                     '-o', '%s/%s.%s.counts' % (self.output_dir(), self.sample, self.output_name),
                                     '-a', self.annotation,
-                                    self.bam_generator(sample = self.sample).output().path]
+                                    bam_file]
         subprocess.call(featureCounts_command)
 
     def output(self):
@@ -149,12 +161,16 @@ class exon_counter(gene_counter):
 
 
 class extract_exon_annotation(luigi.Task):
-
+    '''extract only exons from annotation file,
+       will be used to filter reads that align to an intron
+    '''
     eisa_dir = '%s/eisa' % parameters().exp_dir
 
     def run(self):
-        if not os.path.exists(self.eisa_dir):
+        try:
             os.makedirs(self.eisa_dir)
+        except OSError:
+            pass
 
         with open('%s/exons.gtf' % self.eisa_dir, 'a') as f:
             for line in open(parameters().genome_gtf):
@@ -171,31 +187,33 @@ class extract_exon_annotation(luigi.Task):
 
 class filter_nonexon(luigi.Task):
     '''Make bam file with reads that do not overlap any exons
-    To be used to count reads that map to introns
+       Should end up with a bam file with reads that align to an intron region
+       or do not align at all
     '''
     sample = luigi.Parameter()
     exon_gtf = luigi.Parameter(extract_exon_annotation().output().path)
+
+    def output_dir(self):
+        return '%s/eisa/%s' % (parameters().exp_dir, self.sample)
 
     def requires(self):
         return star_align(self.sample), extract_exon_annotation()
 
     def run(self):
-        eisa_dir = '%s/eisa/%s' % (parameters().exp_dir, self.sample)
+        try:
+            os.makedirs(self.output_dir())
+        except OSError:
+            pass
+
         bam_file = self.input()[0]
-
-        if not os.path.exists(eisa_dir):
-            os.makedirs(eisa_dir)
-
         intersect_command = [
-            'bedtools', 'intersect', '-a', '%s' % bam_file.path, '-b', '%s' % self.exon_gtf, '-v'
-                           ]
-
-        with open('%s/%s.intron.bam' % (eisa_dir, self.sample), 'w') as f:
+            'bedtools', 'intersect', '-a', bam_file.path, '-b', self.exon_gtf, '-v'
+                                    ]
+        with open('%s/%s.intron.bam' % (self.output_dir(), self.sample), 'w') as f:
             subprocess.call(intersect_command, stdout=f)
 
     def output(self):
-        eisa_dir = '%s/eisa/%s' % (parameters().exp_dir, self.sample)
-        return luigi.LocalTarget('%s/%s.intron.bam' % (eisa_dir, self.sample))
+        return luigi.LocalTarget('%s/%s.intron.bam' % (self.output_dir(), self.sample))
 
 
 class intron_counter(gene_counter):
@@ -234,15 +252,12 @@ class protein_coding_gene_intron_counter(gene_counter):
     def requires(self):
         return filter_nonexon(self.sample), extract_protein_coding_annotation()
 
-def table_maker(feature):
-    return parameters().exp_name + '_' + feature
 
 class postgres_gene_count_matrix(luigi.postgres.CopyToTable):
     password = luigi.Parameter(significant = False)
     host = luigi.Parameter(significant = False)
     database = luigi.Parameter(default = 'rna', significant = False)
     user = luigi.Parameter(default = 'rna', significant = False)
-    #feature = luigi.Parameter(default = "gene")
     table = luigi.Parameter(default = parameters().exp_name + '_' + 'gene_counts')
     feature_counter = luigi.TaskParameter(default = gene_counter, significant = False)
 
