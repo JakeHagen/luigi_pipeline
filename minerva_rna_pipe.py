@@ -2,14 +2,14 @@
 
 import luigi
 import luigi.postgres
-# import psycopg2
+#  import psycopg2
 import subprocess
 import os
 import pandas as pd
 import datetime
 from sqlalchemy import create_engine
 from sqlalchemy.schema import CreateSchema
-# from sqlalchemy_utils import database_exists, create_database
+
 
 class parameters(luigi.Config):
     '''
@@ -270,42 +270,7 @@ class all_counters(luigi.WrapperTask):
         yield {sample:protein_coding_gene_intron_counter(sample = sample) for sample in fastqs(sample = "").run()}
 
 
-class postgres_count_matrix(luigi.postgres.CopyToTable):
-    password = luigi.Parameter(significant = False)
-    host = luigi.Parameter(significant = False)
-    database = 'rna'
-    user = luigi.Parameter(default = 'rna', significant = False)
-    table = luigi.Parameter(default = 'gene_counts')
-    feature_counter = luigi.TaskParameter(default = gene_counter, significant = False)
-
-    columns = [("Gene", "TEXT")]
-    columns += [(name, "INT") for name in sorted(fastqs(sample = '').run())]
-
-    def requires(self):
-        return {x:self.feature_counter(sample = x) for x in fastqs(sample = '').run()}
-
-    def rows(self):
-        count_files = [self.input()[y].path for y in self.input()]
-        pandas_files = [
-                        pd.read_table(self.input()[name].path,
-                            skiprows = 2,
-                            index_col = 0,
-                            names = ['Gene', 'Chr', 'Start', 'End',
-                                        'Strand', 'Length', name],
-                            usecols = ['Gene', name],
-                            header = None)
-                        for name in self.input()
-                        ]
-        count_table = pd.concat(pandas_files, axis = 1).sort_index(axis=1)
-        count_table.to_csv("%s/%s.csv" % (parameters().exp_dir, self.table))
-        count_table = count_table.to_records()
-        print(count_table)
-
-        for row in count_table:
-            yield(row)
-
-
-class test_postgres_count_matrix(luigi.Task):
+class postgres_count_matrix(luigi.Task):
     password = luigi.Parameter(significant=False)
     host = luigi.Parameter(significant=False)
     database = 'rna'
@@ -322,10 +287,9 @@ class test_postgres_count_matrix(luigi.Task):
 
         try:
             engine.execute(CreateSchema(parameters().exp_name))
-        except:  # need to find actual exception to catch
+        except:    # should catch psycopg2.ProgrammingError, but doesnt work
             pass
 
-        # count_files = [self.input()[y].path for y in self.input()]
         pandas_files = [
                         pd.read_table(self.input()[name].path,
                                       skiprows=2,
@@ -340,16 +304,12 @@ class test_postgres_count_matrix(luigi.Task):
         count_table.to_csv("%s/%s.csv" % (parameters().exp_dir, self.table))
         count_table.to_sql(self.table, con=engine, schema=parameters().exp_name)
 
+        # Taken from luigi source code, makes marker table and adds entry
         self.output().create_marker_table()
         connection = self.output().connect()
         self.output().touch(connection)
         connection.commit()
         connection.close()
-        # count_table = count_table.to_records()
-        # print(count_table)
-
-        # for row in count_table:
-        #     yield(row)
 
     def output(self):
         return luigi.postgres.PostgresTarget(host=self.host,
@@ -366,35 +326,20 @@ class all_count_matrix(luigi.WrapperTask):
     host = luigi.Parameter(significant=False)
 
     def requires(self):
-        yield test_postgres_count_matrix(password=self.password, host=self.host)
-        yield test_postgres_count_matrix(table="exon_counts",
-                                         feature_counter=exon_counter,
-                                         password=self.password, host=self.host)
-        yield test_postgres_count_matrix(table="protein_gene_counts",
-                                         feature_counter=protein_coding_gene_counter,
-                                         password=self.password, host=self.host)
-        yield test_postgres_count_matrix(table="intron_counts",
-                                         feature_counter=intron_counter,
-                                         password=self.password, host=self.host)
-        yield test_postgres_count_matrix(table="protein_intron_counts",
-                                         feature_counter=protein_coding_gene_intron_counter,
-                                         password=self.password, host=self.host)
+        yield postgres_count_matrix(password=self.password, host=self.host)
+        yield postgres_count_matrix(table="exon_counts",
+                                    feature_counter=exon_counter,
+                                    password=self.password, host=self.host)
+        yield postgres_count_matrix(table="protein_gene_counts",
+                                    feature_counter=protein_coding_gene_counter,
+                                    password=self.password, host=self.host)
+        yield postgres_count_matrix(table="intron_counts",
+                                    feature_counter=intron_counter,
+                                    password=self.password, host=self.host)
+        yield postgres_count_matrix(table="protein_intron_counts",
+                                    feature_counter=protein_coding_gene_intron_counter,
+                                    password=self.password, host=self.host)
 
-# class postgres_exon_count_matrix(postgres_gene_count_matrix):
-#     table = luigi.Parameter(default = parameters().exp_name + '_' + 'exon_counts')
-#     feature_counter = exon_counter
-
-# class postgres_protein_genes_count_matrix(postgres_gene_count_matrix):
-#     table = luigi.Parameter(default = parameters().exp_name + '_' + 'protein_gene_counts')
-#     feature_counter = protein_coding_gene_counter
-
-#class postgres_intron_count_matrix(postgres_gene_count_matrix):
-#    table = luigi.Parameter(default = parameters().exp_name + '_' + 'intron_counts')
-#    feature_counter = intron_counter
-
-#class postgres_protein_intron_count_matrix(postgres_gene_count_matrix):
-#    table = luigi.Parameter(default = parameters().exp_name + '_' + 'protein_intron_counts')
-#    feature_counter = protein_coding_gene_intron_counter
 
 if __name__ == '__main__':
     luigi.run()
