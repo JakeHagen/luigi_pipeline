@@ -1,5 +1,7 @@
-#!/home/jake/.virtualenvs/luigi/bin/python
-
+#!/hpc/users/hagenj02/luigi_pipeline/vluigi/bin/python3.5
+'''#!/home/jake/.virtualenvs/luigi/bin/python
+    for testing on local machine
+'''
 import luigi
 import luigi.postgres
 #  import psycopg2
