@@ -15,20 +15,22 @@ from sqlalchemy.schema import CreateSchema
 
 class parameters(luigi.Config):
     '''
-    Class to contain all parameters. Most of these will need to be set from luigi.cfg file in working directory,
-    which is good because it acts as a log for parameters of experiment
+    Class to contain all parameters. Most of these will need to be set from
+    luigi.cfg file in working directory, which is good because it acts as a log
+    for parameters of experiment
     '''
 
-    fastqs = luigi.Parameter(default = None)
-    exp_dir = luigi.Parameter(default = os.getcwd())
-    genome_fasta = luigi.Parameter(default = None)
-    genome_gtf = luigi.Parameter(default = None)
-    star_genome_folder = luigi.Parameter(default = None)
-    read_length = luigi.IntParameter(default = 100)
-    stranded = luigi.BoolParameter(default = False)
-    paried = luigi.IntParameter(default = 0)
-    cores = luigi.IntParameter(default = 6)
-    exp_name = luigi.Parameter(default = datetime.date.today().strftime("%B%d,%Y"))
+    fastqs = luigi.Parameter(default=None)
+    exp_dir = luigi.Parameter(default=os.getcwd())
+    genome_fasta = luigi.Parameter(default=None)
+    genome_gtf = luigi.Parameter(default=None)
+    star_genome_folder = luigi.Parameter(default=None)
+    read_length = luigi.IntParameter(default=100)
+    stranded = luigi.BoolParameter(default=False)
+    paried = luigi.IntParameter(default=0)
+    cores = luigi.IntParameter(default=6)
+    exp_name = luigi.Parameter(default=
+                               datetime.date.today().strftime("%B%d,%Y"))
 
 
 class fastqs(luigi.Task):
@@ -52,10 +54,9 @@ class fastqs(luigi.Task):
 
 class star_index(luigi.Task):
     '''Index genome to be used with STAR aligner
-
-       More options can be passed to STAR by adding paramters to the config file
+    - More options can be passed to STAR by adding paramters to the config file
     '''
-    star_index = luigi.Parameter(default = "", significant = False)
+    star_index = luigi.Parameter(default="", significant=False)
 
     def run(self):
         try:
@@ -260,6 +261,12 @@ class protein_coding_gene_intron_counter(gene_counter):
     feature_to_count = 'gene'
     output_name = "intron_protein_code"
     annotation = extract_protein_coding_annotation().output().path
+
+
+class multiQC_test(luigi.Task):
+
+    def run(self):
+        subprocess.call(['multiqc', parameters().exp_dir])
 
 
 class all_counters(luigi.WrapperTask):
