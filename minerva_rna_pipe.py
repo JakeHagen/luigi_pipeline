@@ -52,6 +52,33 @@ class fastqs(luigi.Task):
         return luigi.LocalTarget(fastq_file_path)
 
 
+class fastqc(luigi.Task):
+    '''Runs fastqc, quality control program on fastqs
+    '''
+    sample = luigi.Parameter()
+
+    def require(self):
+        return fastqs(self.sample)
+
+    def output_dir(self):
+        return '%s/fastqc' % parameters().exp_dir
+
+    def run(self):
+        try:
+            os.makedirs('%s/fastqc' % self.output_dir())
+        except OSError:
+            pass
+
+        fastqc_command = ['fastqc', self.input().path,
+                          '-o', self.output_dir()]
+        subprocess.call(fastqc_command)
+
+    def output(self):
+        file_name = os.path.basename(self.input().path).split(".")[0]
+        return luigi.LocalTarget('%s/%s_fastqc.html' %
+                                (self.output_dir(), file_name))
+
+
 class star_index(luigi.Task):
     '''Index genome to be used with STAR aligner
     - More options can be passed to STAR by adding paramters to the config file
@@ -60,12 +87,11 @@ class star_index(luigi.Task):
 
     def run(self):
         try:
-             os.makedirs(parameters().star_genome_folder)
+            os.makedirs(parameters().star_genome_folder)
         except OSError:
             pass
 
-        star_command = [
-                        'STAR',
+        star_command = ['STAR',
                         '--runThreadN %d' % parameters().cores,
                         '--runMode genomeGenerate',
                         '--genomeDir %s' % parameters().star_genome_folder,
@@ -87,17 +113,18 @@ class star_index(luigi.Task):
 class star_align(luigi.Task):
     '''Align fastq to previously indexed genome
 
-       More options can be passed to STAR by adding parameters to the config file
+       More options can be passed to STAR by adding parameters to the
+       config file
        The config file already contains default aligner options
     '''
     sample = luigi.Parameter()
-    star_align = luigi.Parameter(default = "", significant = False)
+    star_align = luigi.Parameter(default="", significant=False)
 
     def requires(self):
-        return star_index(), fastqs(sample = self.sample)
+        return star_index(), fastqc(sample=self.sample)
 
     def output_dir(self):
-        return  '%s/%s/star' % (parameters().exp_dir, self.sample)
+        return '%s/%s/star' % (parameters().exp_dir, self.sample)
 
     def run(self):
         try:
@@ -105,46 +132,48 @@ class star_align(luigi.Task):
         except OSError:
             pass
 
-        star_command = [
-                        'STAR',
+        star_command = ['STAR',
                         '--genomeDir %s' % parameters().star_genome_folder,
                         '--readFilesIn %s' % self.input()[1].path,
                         '--runThreadN %d' % parameters().cores,
                         '--outFileNamePrefix %s/%s.' %
-                            (self.output_dir(), self.sample)
+                        (self.output_dir(), self.sample)
                         ]
         for line in self.star_align.splitlines():
             star_command.append(line)
         subprocess.call(star_command)
 
-        if not os.path.isfile('%s/%s.Aligned.sortedByCoord.out.bam' % (self.output_dir(), self.sample)):
+        if not os.path.isfile('%s/%s.Aligned.sortedByCoord.out.bam' %
+                             (self.output_dir(), self.sample)):
             raise OSError("STAR could not create %s bam file" % self.sample)
 
     def output(self):
-        return luigi.LocalTarget('%s/%s.Aligned.sortedByCoord.out.bam' % (self.output_dir(), self.sample))
+        return luigi.LocalTarget('%s/%s.Aligned.sortedByCoord.out.bam' %
+                                (self.output_dir(), self.sample))
 
 
 class gene_counter(luigi.Task):
-    '''Use featureCounts from the subread package to count alignments that overlap
-       a gene.
-       This also serves as a base class for counting on different features besides genes
+    '''Use featureCounts from the subread package to count alignments
+       that overlap a gene.
+       This also serves as a base class for counting on
+       different features besides genes
     '''
     sample = luigi.Parameter()
-    annotation = luigi.Parameter(default = parameters().genome_gtf)
-    bam_generator = luigi.TaskParameter(default = star_align)
-    feature_to_count = luigi.Parameter(default = 'exon')
-    grouper = luigi.Parameter(default = 'gene_id')
-    feature_level = luigi.Parameter(default = "")
-    output_name = luigi.Parameter(default = "gene")
-    
+    annotation = luigi.Parameter(default=parameters().genome_gtf)
+    bam_generator = luigi.TaskParameter(default=star_align)
+    feature_to_count = luigi.Parameter(default='exon')
+    grouper = luigi.Parameter(default='gene_id')
+    feature_level = luigi.Parameter(default="")
+    output_name = luigi.Parameter(default="gene")
+
     def output_dir(self):
-        return  '%s/%s/counts' % (parameters().exp_dir, self.sample)
+        return '%s/%s/counts' % (parameters().exp_dir, self.sample)
 
     def requires(self):
         try:
-            return self.bam_generator(sample = self.sample), require()
+            return self.bam_generator(sample=self.sample), require()
         except NameError:
-            return self.bam_generator(sample = self.sample)
+            return self.bam_generator(sample=self.sample)
 
     def run(self):
         try:
@@ -152,12 +181,17 @@ class gene_counter(luigi.Task):
         except OSError:
             pass
 
-        bam_file = self.bam_generator(sample = self.sample).output().path
-        featureCounts_command = ['featureCounts', '-T', '%d' % parameters().cores,
-                                    '-t', '%s' % self.feature_to_count, '-g', '%s' % self.grouper, self.feature_level,
-                                    '-o', '%s/%s.%s.counts' % (self.output_dir(), self.sample, self.output_name),
-                                    '-a', self.annotation,
-                                    bam_file]
+        bam_file = self.bam_generator(sample=self.sample).output().path
+        featureCounts_command = ['featureCounts',
+                                 '-T', '%d' % parameters().cores,
+                                 '-t', '%s' % self.feature_to_count,
+                                 '-g', '%s' % self.grouper, self.feature_level,
+                                 '-o', '%s/%s.%s.counts' %
+                                 (self.output_dir(),
+                                     self.sample,
+                                     self.output_name),
+                                 '-a', self.annotation,
+                                 bam_file]
         subprocess.call(featureCounts_command)
 
     def output(self):
