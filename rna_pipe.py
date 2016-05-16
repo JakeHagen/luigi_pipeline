@@ -1,5 +1,4 @@
-#!/home/jake/.local/share/virtualenvs/luigi/bin/python3.5
-#####!/hpc/users/hagenj02/luigi_pipeline/vluigi/bin/python3.5
+#!/hpc/users/hagenj02/luigi_pipeline/vluigi/bin/python3.5
 
 import luigi
 import luigi.postgres
@@ -99,7 +98,7 @@ class star_align(luigi.Task):
             os.makedirs(self.output_dir())
         except OSError:
             pass
-
+        print(self.input()[1].path)
         star_command = [
                         'STAR',
                         '--genomeDir %s' % parameters().star_genome_folder,
@@ -304,12 +303,13 @@ class postgres_protein_intron_count_matrix(postgres_gene_count_matrix):
 
 class all_count_matrix(luigi.WrapperTask):
     password = luigi.Parameter(significant = False)
+    host = luigi.Parameter(significant = False)
     def requires(self):
-        yield postgres_gene_count_matrix(self.password)
-        yield postgres_exon_count_matrix(self.password)
-        yield postgres_protein_genes_count_matrix(self.password)
-        yield postgres_intron_count_matrix(self.password)
-        yield postgres_protein_intron_count_matrix(self.password)
+        yield postgres_gene_count_matrix(password = self.password, host = self.host)
+        yield postgres_exon_count_matrix(password = self.password, host = self.host)
+        yield postgres_protein_genes_count_matrix(password = self.password, host = self.host)
+        yield postgres_intron_count_matrix(password = self.password, host = self.host)
+        yield postgres_protein_intron_count_matrix(password = self.password, host = self.host)
 
 if __name__ == '__main__':
     luigi.run()
