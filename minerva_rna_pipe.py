@@ -136,7 +136,7 @@ class gene_counter(luigi.Task):
     grouper = luigi.Parameter(default = 'gene_id')
     feature_level = luigi.Parameter(default = "")
     output_name = luigi.Parameter(default = "gene")
-
+    
     def output_dir(self):
         return  '%s/%s/counts' % (parameters().exp_dir, self.sample)
 
@@ -249,10 +249,9 @@ class extract_protein_coding_annotation(luigi.Task):
 
 
 class protein_coding_gene_counter(gene_counter):
-    sample = luigi.Parameter()
     annotation = extract_protein_coding_annotation().output().path
-    require = extract_protein_coding_annotation
-    output_name = luigi.Parameter(default = "gene_protein_code")
+    require = extract_protein_coding_annotation()
+    output_name = "gene_protein_code"
 
 
 class protein_coding_gene_intron_counter(gene_counter):
