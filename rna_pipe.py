@@ -304,6 +304,7 @@ class postgres_protein_intron_count_matrix(postgres_gene_count_matrix):
 
 class all_count_matrix(luigi.WrapperTask):
     password = luigi.Parameter(significant = False)
+    host = luigi.Parameter(significant = False)	
     def requires(self):
         yield postgres_gene_count_matrix(self.password)
         yield postgres_exon_count_matrix(self.password)
