@@ -4,7 +4,7 @@
 '''
 import luigi
 import luigi.postgres
-#  import psycopg2
+ import psycopg2
 import subprocess
 import os
 import pandas as pd
@@ -57,15 +57,15 @@ class fastqc(luigi.Task):
     '''
     sample = luigi.Parameter()
 
-    def require(self):
-        return fastqs(self.sample)
+    def requires(self):
+        return fastqs(sample=self.sample)
 
     def output_dir(self):
         return '%s/fastqc' % parameters().exp_dir
 
     def run(self):
         try:
-            os.makedirs('%s/fastqc' % self.output_dir())
+            os.makedirs(self.output_dir())
         except OSError:
             pass
 
@@ -77,6 +77,15 @@ class fastqc(luigi.Task):
         file_name = os.path.basename(self.input().path).split(".")[0]
         return luigi.LocalTarget('%s/%s_fastqc.html' %
                                 (self.output_dir(), file_name))
+
+
+class all_fastqc(luigi.WrapperTask):
+   
+
+    def requires(self):
+        t = {s: fastqc(sample=s) for s, p in fastqs(sample="").run().items()}
+        print(t)
+        yield t
 
 
 class star_index(luigi.Task):
@@ -134,7 +143,7 @@ class star_align(luigi.Task):
 
         star_command = ['STAR',
                         '--genomeDir %s' % parameters().star_genome_folder,
-                        '--readFilesIn %s' % self.input()[1].path,
+                        '--readFilesIn %s' % fastqs(sample=self.sample).output().path,
                         '--runThreadN %d' % parameters().cores,
                         '--outFileNamePrefix %s/%s.' %
                         (self.output_dir(), self.sample)
@@ -195,7 +204,7 @@ class gene_counter(luigi.Task):
         subprocess.call(featureCounts_command)
 
     def output(self):
-        return luigi.LocalTarget('%s/%s.%s.counts' % (self.output_dir(), self.sample, self.output_name))
+        return luigi.LocalTarget('%s/%s_%s.counts' % (self.output_dir(), self.sample, self.output_name))
 
 
 class exon_counter(gene_counter):
