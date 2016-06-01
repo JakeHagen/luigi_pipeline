@@ -4,7 +4,7 @@
 '''
 import luigi
 import luigi.postgres
- import psycopg2
+import psycopg2
 import subprocess
 import os
 import pandas as pd
@@ -79,15 +79,6 @@ class fastqc(luigi.Task):
                                 (self.output_dir(), file_name))
 
 
-class all_fastqc(luigi.WrapperTask):
-   
-
-    def requires(self):
-        t = {s: fastqc(sample=s) for s, p in fastqs(sample="").run().items()}
-        print(t)
-        yield t
-
-
 class star_index(luigi.Task):
     '''Index genome to be used with STAR aligner
     - More options can be passed to STAR by adding paramters to the config file
@@ -130,7 +121,7 @@ class star_align(luigi.Task):
     star_align = luigi.Parameter(default="", significant=False)
 
     def requires(self):
-        return star_index(), fastqc(sample=self.sample)
+        return star_index(), fastqs(sample=self.sample)
 
     def output_dir(self):
         return '%s/%s/star' % (parameters().exp_dir, self.sample)
@@ -143,7 +134,7 @@ class star_align(luigi.Task):
 
         star_command = ['STAR',
                         '--genomeDir %s' % parameters().star_genome_folder,
-                        '--readFilesIn %s' % fastqs(sample=self.sample).output().path,
+                        '--readFilesIn %s' % self.input()[1].path,
                         '--runThreadN %d' % parameters().cores,
                         '--outFileNamePrefix %s/%s.' %
                         (self.output_dir(), self.sample)
@@ -371,6 +362,10 @@ class postgres_count_matrix(luigi.Task):
                                              update_id=parameters().exp_name +
                                              '_' + self.table)
 
+class all_some_task(luigi.WrapperTask):
+    require = luigi.TaskParameter()
+    def requires(self):
+        yield {sample:self.require(sample = sample) for sample in fastqs(sample = "").run()}
 
 class all_count_matrix(luigi.WrapperTask):
     password = luigi.Parameter(significant=False)
