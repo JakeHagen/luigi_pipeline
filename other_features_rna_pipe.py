@@ -40,6 +40,23 @@ class protein_coding_gene_intron_counter(brp.gene_counter):
     annotation = extract_protein_coding_annotation().output().path
 
 
+class viral_counter(brp.gene_counter):
+
+    def featureCounts_command(self):
+        bam_file = self.bam_generator(sample=self.sample).output().path
+        featCounts_command = ['featureCounts',
+                              '-T', '%d' % configs().cores,
+                              '-t', '%s' % self.feature_to_count,
+                              '-g', '%s' % self.grouper, self.feature_level,
+                              '-M',  # count multimappers
+                              '-o', '%s/%s_%s.counts' %
+                              (self.output_dir(),
+                               self.sample,
+                               self.output_name),
+                              '-a', self.annotation,
+                              bam_file]
+        return featCounts_command
+
 # These classes could have been kept as is and given parameters instead of
 # subclassing. I thought this was easier, with less parameters to specify
 class protein_gene_count_matrix(brp.postgres_count_matrix):

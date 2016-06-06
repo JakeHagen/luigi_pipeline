@@ -362,29 +362,39 @@ class postgres_count_matrix(luigi.Task):
                                              update_id=parameters().exp_name +
                                              '_' + self.table)
 
+
 class all_some_task(luigi.WrapperTask):
     require = luigi.TaskParameter()
+
     def requires(self):
-        yield {sample:self.require(sample = sample) for sample in fastqs(sample = "").run()}
+        yield {sample: self.require(sample=sample)
+               for sample in fastqs(sample="").run()}
+
 
 class all_count_matrix(luigi.WrapperTask):
     password = luigi.Parameter(significant=False)
     host = luigi.Parameter(significant=False)
 
     def requires(self):
-        yield postgres_count_matrix(password=self.password, host=self.host)
-        yield postgres_count_matrix(table="exon_counts",
-                                    feature_counter=exon_counter,
-                                    password=self.password, host=self.host)
-        yield postgres_count_matrix(table="protein_gene_counts",
-                                    feature_counter=protein_coding_gene_counter,
-                                    password=self.password, host=self.host)
-        yield postgres_count_matrix(table="intron_counts",
-                                    feature_counter=intron_counter,
-                                    password=self.password, host=self.host)
-        yield postgres_count_matrix(table="protein_intron_counts",
-                                    feature_counter=protein_coding_gene_intron_counter,
-                                    password=self.password, host=self.host)
+        yield postgres_count_matrix(
+            password=self.password,
+            host=self.host)
+        yield postgres_count_matrix(
+            table="exon_counts",
+            feature_counter=exon_counter,
+            password=self.password, host=self.host)
+        yield postgres_count_matrix(
+            table="protein_gene_counts",
+            feature_counter=protein_coding_gene_counter,
+            password=self.password, host=self.host)
+        yield postgres_count_matrix(
+            table="intron_counts",
+            feature_counter=intron_counter,
+            password=self.password, host=self.host)
+        yield postgres_count_matrix(
+            table="protein_intron_counts",
+            feature_counter=protein_coding_gene_intron_counter,
+            password=self.password, host=self.host)
 
 
 if __name__ == '__main__':

@@ -143,24 +143,28 @@ class gene_counter(luigi.Task):
         except AttributeError:
             return self.bam_generator(sample=self.sample)
 
+    # featureCounts command into function so it can be easily subclassed
+    # for very specialized use cases
+    def featureCounts_command(self):
+        bam_file = self.bam_generator(sample=self.sample).output().path
+        featCounts_command = ['featureCounts',
+                              '-T', '%d' % configs().cores,
+                              '-t', '%s' % self.feature_to_count,
+                              '-g', '%s' % self.grouper, self.feature_level,
+                              '-o', '%s/%s_%s.counts' %
+                              (self.output_dir(),
+                               self.sample,
+                               self.output_name),
+                              '-a', self.annotation,
+                              bam_file]
+        return featCounts_command
+
     def run(self):
         try:
             os.makedirs(self.output_dir())
         except OSError:
             pass
-
-        bam_file = self.bam_generator(sample=self.sample).output().path
-        featureCounts_command = ['featureCounts',
-                                 '-T', '%d' % configs().cores,
-                                 '-t', '%s' % self.feature_to_count,
-                                 '-g', '%s' % self.grouper, self.feature_level,
-                                 '-o', '%s/%s_%s.counts' %
-                                 (self.output_dir(),
-                                     self.sample,
-                                     self.output_name),
-                                 '-a', self.annotation,
-                                 bam_file]
-        subprocess.call(featureCounts_command)
+        subprocess.call(self.featureCounts_command())
 
     def output(self):
         return luigi.LocalTarget(
