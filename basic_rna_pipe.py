@@ -71,6 +71,11 @@ class fastqs(luigi.Task):
         fastq_dict = {}
         for line in self.sample_fastqs.splitlines():
             sample, path = line.split(":")
+            try:
+                path_one, path_two = path.split()
+                path = (path_one, path_two)
+            except ValueError:
+                pass
             fastq_dict[sample] = path
         if self.sample is None:
             return fastq_dict
