@@ -1,4 +1,5 @@
 import luigi
+import os
 import basic_rna_pipe as brp
 import eisa_rna_pipe as erp
 
@@ -11,8 +12,8 @@ class exon_counter(brp.gene_counter):
 
 
 class extract_protein_coding_annotation(luigi.Task):
-
-    def run(self):
+    
+    def make_protein_coding_gtf(self):
         with open('%s/protein_coding.gtf' % brp.configs().exp_dir, 'a') as f:
             for line in open(brp.configs().genome_gtf):
                 if "##" in line:
@@ -20,6 +21,13 @@ class extract_protein_coding_annotation(luigi.Task):
                 else:
                     if 'protein_coding' in line:
                         print(line, end='', file=f)
+
+    def run(self):
+        try:
+            self.make_protein_coding_gtf()
+        except FileNotFoundError:
+            os.makedirs(brp.configs().exp_dir)
+            self.make_protein_coding_gtf()
 
     def output(self):
         return luigi.LocalTarget('%s/protein_coding.gtf' %
