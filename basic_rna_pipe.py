@@ -73,12 +73,15 @@ class fastqs(luigi.Task):
             sample, path = line.split(":")
             try:
                 path_one, path_two = path.split()
-                path = (path_one, path_two)
+                path = path_one, path_two
             except ValueError:
                 pass
             fastq_dict[sample] = path
         if self.sample is None:
             return fastq_dict
+        elif type(fastq_dict[self.sample]) is tuple:
+            return {'fastq_pair_1': luigi.LocalTarget(fastq_dict[self.sample][0]),
+                    'fastq_pair_2': luigi.LocalTarget(fastq_dict[self.sample][1])} 
         else:
             return luigi.LocalTarget(fastq_dict[self.sample])
 
@@ -104,10 +107,17 @@ class star_align(luigi.Task):
             os.makedirs(self.output_dir())
         except OSError:
             pass
-
+        
+        if type(self.input()[1]) is dict:
+            fastqs = ''
+            for x in self.input()[1]:
+                fastqs += self.input()[1][x].path
+                fastqs += ' '
+        else:
+            fastqs = self.input()[1].path
         star_command = ['STAR',
                         '--genomeDir %s' % configs().star_genome_folder,
-                        '--readFilesIn %s' % self.input()[1].path,
+                        '--readFilesIn %s' % fastqs,
                         '--runThreadN %d' % configs().cores,
                         '--outFileNamePrefix %s/%s.' %
                         (self.output_dir(), self.sample)
