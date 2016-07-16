@@ -80,8 +80,10 @@ class fastqs(luigi.Task):
         if self.sample is None:
             return fastq_dict
         elif type(fastq_dict[self.sample]) is tuple:
-            return {'fastq_pair_1': luigi.LocalTarget(fastq_dict[self.sample][0]),
-                    'fastq_pair_2': luigi.LocalTarget(fastq_dict[self.sample][1])} 
+            return {'fastq_pair_1':
+                    luigi.LocalTarget(fastq_dict[self.sample][0]),
+                    'fastq_pair_2':
+                    luigi.LocalTarget(fastq_dict[self.sample][1])}
         else:
             return luigi.LocalTarget(fastq_dict[self.sample])
 
@@ -107,7 +109,7 @@ class star_align(luigi.Task):
             os.makedirs(self.output_dir())
         except OSError:
             pass
-        
+
         if type(self.input()[1]) is dict:
             fastqs = ''
             for x in self.input()[1]:
